@@ -1,0 +1,2024 @@
+// Signalroom — revenue operating system
+// PostgreSQL schema. Every tenant-owned row carries workspaceId and is scoped
+// at the query layer (see src/lib/db/tenant.ts). Soft deletes via deletedAt.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------------
+
+enum IcpTier {
+  A
+  B
+  C
+  D
+}
+
+enum IntentLevel {
+  COLD
+  AWARE
+  WARM
+  HOT
+  BUYING
+}
+
+enum LeadStatus {
+  NEW
+  WORKING
+  CONTACTED
+  REPLIED
+  QUALIFIED
+  NURTURE
+  UNQUALIFIED
+}
+
+enum SignalType {
+  SOCIAL_POST
+  SOCIAL_COMMENT
+  HIRING
+  JOB_CHANGE
+  FUNDING
+  TECH_CHANGE
+  WEBSITE_UPDATE
+  ANNOUNCEMENT
+  NEWS
+  RFP
+  EVENT
+  REVIEW
+  COMPETITOR_MENTION
+  EMAIL_ACTIVITY
+  PROPOSAL_ACTIVITY
+  MEETING
+  MANUAL_NOTE
+}
+
+enum SignalSourceKind {
+  PUBLIC_WEB
+  JOB_BOARD
+  NEWS
+  SOCIAL_PUBLIC
+  COMPANY_SITE
+  LICENSED_DATASET
+  USER_INTEGRATION
+  USER_MANUAL
+  TENDER_PORTAL
+}
+
+enum Channel {
+  EMAIL
+  WHATSAPP
+  LINKEDIN
+  PHONE
+  SMS
+  IN_PERSON
+}
+
+enum ContactKind {
+  WORK_EMAIL
+  PERSONAL_EMAIL
+  DIRECT_PHONE
+  MOBILE
+  SWITCHBOARD
+  LINKEDIN_URL
+  WHATSAPP
+}
+
+enum VerificationStatus {
+  VERIFIED
+  LIKELY
+  UNVERIFIED
+  FAILED
+}
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+}
+
+enum TaskStatus {
+  QUEUED
+  WORKING
+  NEEDS_ATTENTION
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum PointTxnType {
+  PURCHASE
+  PLAN_ALLOCATION
+  REVEAL
+  RESEARCH
+  ENRICHMENT
+  VOICE_NOTE
+  REFUND
+  ADMIN_ADJUSTMENT
+  EXPIRY
+}
+
+enum AutopilotMode {
+  OFF
+  REVIEW_FIRST
+  FULL_AUTO
+}
+
+enum AgentKind {
+  PROSPECTING
+  RESEARCH
+  SDR
+  FOLLOW_UP
+  PIPELINE
+  PROPOSAL
+  MEETING
+  REVENUE_ANALYST
+}
+
+enum ActorType {
+  HUMAN
+  AI
+  SYSTEM
+}
+
+enum AuditSource {
+  UI
+  API
+  MCP
+  AUTOPILOT
+  INTEGRATION
+  SYSTEM
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageState {
+  DRAFT
+  PENDING_APPROVAL
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  REPLIED
+  BOUNCED
+  FAILED
+  UNSUBSCRIBED
+}
+
+enum ConversationState {
+  OPEN
+  NEEDS_YOU
+  WAITING
+  SNOOZED
+  CLOSED
+}
+
+enum ProposalState {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum NotificationKind {
+  HOT_LEAD
+  NEW_REPLY
+  LEAD_SIGNAL
+  DEAL_RISK
+  TASK_DUE
+  PROPOSAL_VIEWED
+  PROPOSAL_ACCEPTED
+  PROPOSAL_DECLINED
+  MEETING_BOOKED
+  AUTOPILOT_APPROVAL
+  POINTS_LOW
+  INTEGRATION_ERROR
+}
+
+enum InsightKind {
+  DAILY_BRIEF
+  COACH_TIP
+  DEAL_RISK
+  LEAD_RECOMMENDATION
+  QUERY_OPTIMIZATION
+  FORECAST_NOTE
+}
+
+enum RunState {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  HELD_FOR_REVIEW
+}
+
+enum StickyNoteKind {
+  IDEA
+  REMINDER
+  OBJECTION
+  FOLLOW_UP
+  PERSONAL
+}
+
+enum WatchTargetKind {
+  LEAD
+  COMPANY
+  COMPETITOR
+  KEYWORD
+  TECHNOLOGY
+  INDUSTRY
+}
+
+enum AlertFrequency {
+  REALTIME
+  DAILY
+  WEEKLY
+}
+
+enum RadarStage {
+  AWARE
+  EVALUATING
+  READY_TO_BUY
+}
+
+enum CommitteeRole {
+  CHAMPION
+  DECISION_MAKER
+  INFLUENCER
+  TECHNICAL_EVALUATOR
+  FINANCE
+  PROCUREMENT
+  BLOCKER
+  UNKNOWN
+}
+
+// ---------------------------------------------------------------------------
+// IDENTITY & TENANCY
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String
+  avatarUrl     String?
+  locale        String    @default("en-IN")
+  timezone      String    @default("Asia/Kolkata")
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String?
+  /// Bcrypt hashes. A database read must not hand someone a way past the second factor.
+  mfaRecoveryCodes String[]
+  /// The last TOTP step spent, so the same code cannot be used twice.
+  mfaLastUsedStep  Int?
+  mfaEnrolledAt    DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  memberships  WorkspaceMember[]
+  sessions     Session[]
+  ownedLeads   Lead[]            @relation("LeadOwner")
+  ownedDeals   Deal[]            @relation("DealOwner")
+  tasks        Task[]            @relation("TaskOwner")
+  notes        Note[]
+  stickyNotes  StickyNote[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+  activities   Activity[]        @relation("ActivityActor")
+  taskAssignments TaskAssignment[]
+
+  @@index([deletedAt])
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  tokenHash    String   @unique
+  workspaceId  String?  @db.Uuid
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Workspace {
+  id             String        @id @default(uuid()) @db.Uuid
+  name           String
+  slug           String        @unique
+  logoUrl        String?
+  website        String?
+  industry       String?
+  country        String        @default("IN")
+  currency       String        @default("INR")
+  timezone       String        @default("Asia/Kolkata")
+  locale         String        @default("en-IN")
+  gstin          String?
+  autopilotMode  AutopilotMode @default(OFF)
+  onboardedAt    DateTime?
+  archiveAfterDays Int         @default(45)
+  recycleBinDays Int           @default(30)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  members         WorkspaceMember[]
+  roles           Role[]
+  subscription    Subscription?
+  pointLedger     PointLedger[]
+  icpProfiles     IcpProfile[]
+  companies       Company[]
+  people          Person[]
+  leads           Lead[]
+  signals         Signal[]
+  searchPhrases   SearchPhrase[]
+  lists           List[]
+  pipelines       Pipeline[]
+  deals           Deal[]
+  tasks           Task[]
+  notes           Note[]
+  activities      Activity[]
+  conversations   Conversation[]
+  messages        Message[]
+  sequences       Sequence[]
+  proposals       Proposal[]
+  bookings        Booking[]
+  researchReports ResearchReport[]
+  insights        AIInsight[]
+  agents          AIAgent[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  webhooks        Webhook[]
+  apiKeys         ApiKey[]
+  files           File[]
+  stickyNotes     StickyNote[]
+  radarWatches    RadarWatch[]
+  savedSearches   SavedSearch[]
+  knowledgeDocs   KnowledgeDoc[]
+  playbooks       Playbook[]
+  competitors     Competitor[]
+  suppressions    Suppression[]
+  scoringConfig   ScoringConfig?
+  featureFlags    FeatureFlag[]
+  autopilotConfig AutopilotConfig?
+  agentRuns       AgentRun[]
+  aiRequests      AIRequestLog[]
+  deletedRecords  DeletedRecord[]
+
+  @@index([deletedAt])
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  key         String
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  permissions String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members   WorkspaceMember[]
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  userId      String    @db.Uuid
+  roleId      String    @db.Uuid
+  title       String?
+  isDefault   Boolean   @default(false)
+  dailyPointCap Int?
+  invitedAt   DateTime?
+  joinedAt    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role      @relation(fields: [roleId], references: [id])
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId, deletedAt])
+}
+
+// ---------------------------------------------------------------------------
+// BILLING & POINTS
+// ---------------------------------------------------------------------------
+
+model Plan {
+  id            String   @id @default(uuid()) @db.Uuid
+  key           String   @unique
+  name          String
+  description   String?
+  priceMonthly  Decimal  @db.Decimal(12, 2)
+  priceYearly   Decimal? @db.Decimal(12, 2)
+  currency      String   @default("INR")
+  seatsIncluded Int      @default(1)
+  pointsMonthly Int      @default(0)
+  features      Json     @default("{}")
+  isPublic      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @unique @db.Uuid
+  planId             String    @db.Uuid
+  status             String    @default("trialing")
+  seats              Int       @default(1)
+  currentPeriodStart DateTime  @default(now())
+  currentPeriodEnd   DateTime
+  trialEndsAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [planId], references: [id])
+}
+
+/// Immutable append-only ledger. Balance = SUM(delta). Never update or delete rows.
+model PointLedger {
+  id          String       @id @default(uuid()) @db.Uuid
+  workspaceId String       @db.Uuid
+  type        PointTxnType
+  delta       Int
+  balanceAfter Int
+  reason      String
+  actorType   ActorType    @default(HUMAN)
+  actorUserId String?      @db.Uuid
+  refType     String?
+  refId       String?
+  idempotencyKey String?   @unique
+  metadata    Json         @default("{}")
+  createdAt   DateTime     @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, type])
+}
+
+// ---------------------------------------------------------------------------
+// ICP & SCORING CONFIG
+// ---------------------------------------------------------------------------
+
+model IcpProfile {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  name           String
+  isPrimary      Boolean  @default(false)
+  sellsDescription String?
+  industries     String[]
+  locations      String[]
+  employeeMin    Int?
+  employeeMax    Int?
+  revenueMinInr  Decimal? @db.Decimal(14, 2)
+  revenueMaxInr  Decimal? @db.Decimal(14, 2)
+  buyerRoles     String[]
+  seniorities    String[]
+  technologies   String[]
+  pains          String[]
+  triggerEvents  String[]
+  exclusions     String[]
+  rules          Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  leads     Lead[]
+
+  @@index([workspaceId, deletedAt])
+}
+
+/// Weights for the composite lead score. Every dimension stays separately stored.
+model ScoringConfig {
+  id                 String   @id @default(uuid()) @db.Uuid
+  workspaceId        String   @unique @db.Uuid
+  fitWeight          Int      @default(25)
+  intentWeight       Int      @default(25)
+  urgencyWeight      Int      @default(15)
+  authorityWeight    Int      @default(10)
+  budgetWeight       Int      @default(10)
+  reachabilityWeight Int      @default(5)
+  engagementWeight   Int      @default(5)
+  recencyWeight      Int      @default(5)
+  tierACutoff        Int      @default(80)
+  tierBCutoff        Int      @default(60)
+  tierCCutoff        Int      @default(40)
+  updatedAt          DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// COMPANIES, PEOPLE, CONTACTS
+// ---------------------------------------------------------------------------
+
+model Company {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @db.Uuid
+  name          String
+  legalName     String?
+  domain        String?
+  website       String?
+  linkedinUrl   String?
+  logoUrl       String?
+  description   String?
+  industry      String?
+  subIndustry   String?
+  employeeCount Int?
+  employeeBand  String?
+  revenueBandInr String?
+  foundedYear   Int?
+  city          String?
+  state         String?
+  country       String    @default("India")
+  technologies  String[]
+  tags          String[]
+  intentScore   Int       @default(0)
+  intentScoreReason Json   @default("{}")
+  lastSignalAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  employments Employment[]
+  leads       Lead[]
+  signals     Signal[]
+  deals       Deal[]
+  committee   CommitteeMember[]
+  research    ResearchReport[]
+  notes       Note[]
+  tasks       Task[]
+  activities  Activity[]
+  proposals   Proposal[]
+  conversations Conversation[]
+
+  @@unique([workspaceId, domain])
+  @@index([workspaceId, deletedAt])
+  @@index([workspaceId, industry])
+  @@index([workspaceId, city])
+  @@index([workspaceId, intentScore])
+  @@index([name])
+}
+
+model Person {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @db.Uuid
+  fullName     String
+  firstName    String?
+  lastName     String?
+  headline     String?
+  linkedinUrl  String?
+  avatarUrl    String?
+  city         String?
+  state        String?
+  country      String    @default("India")
+  languages    String[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  employments    Employment[]
+  contactMethods ContactMethod[]
+  leads          Lead[]
+  signals        Signal[]
+  committee      CommitteeMember[]
+  memory         RelationshipMemory[]
+  research       ResearchReport[]
+
+  @@index([workspaceId, deletedAt])
+  @@index([workspaceId, linkedinUrl])
+  @@index([fullName])
+}
+
+model Employment {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  personId    String    @db.Uuid
+  companyId   String    @db.Uuid
+  title       String
+  department  String?
+  seniority   String?
+  isDecisionMaker Boolean @default(false)
+  isCurrent   Boolean   @default(true)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  person  Person  @relation(fields: [personId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([personId, isCurrent])
+  @@index([companyId, isCurrent])
+}
+
+/// Contact details. `isLocked` = present in source but not yet paid for / revealed.
+model ContactMethod {
+  id            String             @id @default(uuid()) @db.Uuid
+  workspaceId   String             @db.Uuid
+  personId      String             @db.Uuid
+  kind          ContactKind
+  value         String?
+  maskedValue   String
+  isLocked      Boolean            @default(true)
+  isPrimary     Boolean            @default(false)
+  status        VerificationStatus @default(UNVERIFIED)
+  confidence    Int                @default(50)
+  source        String
+  verifiedAt    DateTime?
+  revealedAt    DateTime?
+  revealedByUserId String?         @db.Uuid
+  bounceCount   Int                @default(0)
+  optedOutAt    DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, personId])
+  @@index([workspaceId, kind])
+  @@index([value])
+}
+
+/// Structured, AI-readable relationship context per person (§114).
+model RelationshipMemory {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  personId    String   @db.Uuid
+  kind        String
+  content     String
+  sourceType  String
+  sourceId    String?
+  confidence  Int      @default(70)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, personId])
+}
+
+// ---------------------------------------------------------------------------
+// LEADS, SCORES, SIGNALS
+// ---------------------------------------------------------------------------
+
+model Lead {
+  id             String      @id @default(uuid()) @db.Uuid
+  workspaceId    String      @db.Uuid
+  personId       String      @db.Uuid
+  companyId      String      @db.Uuid
+  icpProfileId   String?     @db.Uuid
+  ownerId        String?     @db.Uuid
+  status         LeadStatus  @default(NEW)
+  tier           IcpTier     @default(C)
+  intent         IntentLevel @default(COLD)
+  isStarred      Boolean     @default(false)
+  isRevealed     Boolean     @default(false)
+  estimatedBudgetInr Decimal? @db.Decimal(14, 2)
+  surfacedAt     DateTime    @default(now())
+  surfacedReason String
+  sourcePhraseId String?     @db.Uuid
+  lastContactedAt DateTime?
+  lastActivityAt DateTime?
+  repliedAt      DateTime?
+  nextActionAt   DateTime?
+  nextActionLabel String?
+  archivedAt     DateTime?
+  discardedAt    DateTime?
+  discardReason  String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  workspace  Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  person     Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
+  company    Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  icpProfile IcpProfile?   @relation(fields: [icpProfileId], references: [id])
+  owner      User?         @relation("LeadOwner", fields: [ownerId], references: [id])
+  sourcePhrase SearchPhrase? @relation(fields: [sourcePhraseId], references: [id])
+
+  score         LeadScore?
+  signals       Signal[]
+  deals         Deal[]
+  tasks         Task[]
+  notes         Note[]
+  activities    Activity[]
+  conversations Conversation[]
+  listMembers   ListMember[]
+  research      ResearchReport[]
+  proposals     Proposal[]
+  enrollments   SequenceEnrollment[]
+  insights      AIInsight[]
+  bookings      Booking[]
+  readiness     ReadinessItem[]
+  nextBestActions NextBestAction[]
+
+  @@unique([workspaceId, personId, companyId])
+  @@index([workspaceId, deletedAt, archivedAt])
+  @@index([workspaceId, status])
+  @@index([workspaceId, tier])
+  @@index([workspaceId, intent])
+  @@index([workspaceId, ownerId])
+  @@index([workspaceId, surfacedAt])
+  @@index([workspaceId, isStarred])
+  @@index([workspaceId, lastActivityAt])
+}
+
+/// Separate dimensions, never a single black-box number (§71).
+model LeadScore {
+  id                String   @id @default(uuid()) @db.Uuid
+  workspaceId       String   @db.Uuid
+  leadId            String   @unique @db.Uuid
+  fitScore          Int      @default(0)
+  intentScore       Int      @default(0)
+  urgencyScore      Int      @default(0)
+  authorityScore    Int      @default(0)
+  budgetScore       Int      @default(0)
+  reachabilityScore Int      @default(0)
+  engagementScore   Int      @default(0)
+  recencyScore      Int      @default(0)
+  composite         Int      @default(0)
+  displayScore      Decimal  @db.Decimal(3, 1) @default(0)
+  overriddenScore   Decimal? @db.Decimal(3, 1)
+  overriddenById    String?  @db.Uuid
+  overrideReason    String?
+  computedAt        DateTime @default(now())
+  modelVersion      String   @default("v1")
+
+  lead     Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  evidence LeadScoreEvidence[]
+
+  @@index([workspaceId, composite])
+}
+
+model LeadScoreEvidence {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  leadScoreId String   @db.Uuid
+  dimension   String
+  points      Int
+  label       String
+  detail      String?
+  signalId    String?  @db.Uuid
+  sourceType  String
+  sourceRef   String?
+  createdAt   DateTime @default(now())
+
+  leadScore LeadScore @relation(fields: [leadScoreId], references: [id], onDelete: Cascade)
+
+  @@index([leadScoreId])
+  @@index([workspaceId])
+}
+
+model Signal {
+  id            String           @id @default(uuid()) @db.Uuid
+  workspaceId   String           @db.Uuid
+  leadId        String?          @db.Uuid
+  personId      String?          @db.Uuid
+  companyId     String?          @db.Uuid
+  type          SignalType
+  sourceKind    SignalSourceKind
+  sourceName    String
+  sourceUrl     String?
+  title         String
+  excerpt       String
+  aiInterpretation String?
+  confidence    Int              @default(60)
+  intentDelta   Int              @default(0)
+  suggestedAction String?
+  keywords      String[]
+  occurredAt    DateTime
+  detectedAt    DateTime         @default(now())
+  searchPhraseId String?         @db.Uuid
+  dedupeHash    String
+  createdAt     DateTime         @default(now())
+  deletedAt     DateTime?
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead         Lead?         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  person       Person?       @relation(fields: [personId], references: [id], onDelete: SetNull)
+  company      Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  searchPhrase SearchPhrase? @relation(fields: [searchPhraseId], references: [id])
+
+  @@unique([workspaceId, dedupeHash])
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, type])
+  @@index([workspaceId, leadId])
+  @@index([workspaceId, companyId])
+}
+
+// ---------------------------------------------------------------------------
+// ACQUISITION — SEARCH PHRASES
+// ---------------------------------------------------------------------------
+
+model SearchPhrase {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  phrase      String
+  sourceKind  SignalSourceKind
+  isActive    Boolean   @default(true)
+  cadenceHours Int      @default(24)
+  negativeKeywords String[]
+  createdByAi Boolean   @default(false)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      SearchRun[]
+  leads     Lead[]
+  signals   Signal[]
+
+  @@index([workspaceId, isActive])
+  @@index([nextRunAt])
+}
+
+model SearchRun {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  searchPhraseId String   @db.Uuid
+  state          RunState @default(PENDING)
+  signalsFound   Int      @default(0)
+  leadsCreated   Int      @default(0)
+  duplicates     Int      @default(0)
+  errorMessage   String?
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  idempotencyKey String?  @unique
+
+  searchPhrase SearchPhrase @relation(fields: [searchPhraseId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, startedAt])
+  @@index([searchPhraseId, startedAt])
+}
+
+// ---------------------------------------------------------------------------
+// LISTS, WATCHES, SAVED SEARCHES
+// ---------------------------------------------------------------------------
+
+model List {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  description String?
+  isDynamic   Boolean   @default(false)
+  filterJson  Json      @default("{}")
+  color       String?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members   ListMember[]
+
+  @@index([workspaceId, deletedAt])
+}
+
+model ListMember {
+  id        String   @id @default(uuid()) @db.Uuid
+  workspaceId String @db.Uuid
+  listId    String   @db.Uuid
+  leadId    String   @db.Uuid
+  addedAt   DateTime @default(now())
+  addedById String?  @db.Uuid
+
+  list List @relation(fields: [listId], references: [id], onDelete: Cascade)
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, leadId])
+  @@index([workspaceId])
+  @@index([leadId])
+}
+
+model RadarWatch {
+  id          String          @id @default(uuid()) @db.Uuid
+  workspaceId String          @db.Uuid
+  targetKind  WatchTargetKind
+  targetId    String?
+  targetLabel String
+  frequency   AlertFrequency  @default(DAILY)
+  alertOn     String[]
+  stage       RadarStage      @default(AWARE)
+  confidence  Int             @default(50)
+  isActive    Boolean         @default(true)
+  createdById String?         @db.Uuid
+  lastAlertAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, isActive])
+}
+
+model SavedSearch {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @db.Uuid
+  name        String
+  surface     String
+  filterJson  Json           @default("{}")
+  alertEnabled Boolean       @default(false)
+  frequency   AlertFrequency @default(DAILY)
+  createdById String?        @db.Uuid
+  lastAlertAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, surface])
+}
+
+// ---------------------------------------------------------------------------
+// PIPELINE
+// ---------------------------------------------------------------------------
+
+model Pipeline {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  isDefault   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  stages    PipelineStage[]
+  deals     Deal[]
+
+  @@index([workspaceId, deletedAt])
+}
+
+model PipelineStage {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  pipelineId   String   @db.Uuid
+  key          String
+  name         String
+  sortOrder    Int
+  probability  Int      @default(0)
+  isWon        Boolean  @default(false)
+  isLost       Boolean  @default(false)
+  stallAfterDays Int    @default(10)
+  color        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  pipeline Pipeline           @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  deals    Deal[]
+  history  DealStageHistory[]
+
+  @@unique([pipelineId, key])
+  @@index([workspaceId])
+}
+
+model Deal {
+  id           String     @id @default(uuid()) @db.Uuid
+  workspaceId  String     @db.Uuid
+  pipelineId   String     @db.Uuid
+  stageId      String     @db.Uuid
+  leadId       String?    @db.Uuid
+  companyId    String     @db.Uuid
+  ownerId      String?    @db.Uuid
+  title        String
+  valueInr     Decimal    @db.Decimal(14, 2) @default(0)
+  currency     String     @default("INR")
+  status       DealStatus @default(OPEN)
+  repForecast  String?
+  confidence   Int        @default(50)
+  sortOrder    Int        @default(0)
+  expectedCloseAt DateTime?
+  stageEnteredAt  DateTime @default(now())
+  lastActivityAt  DateTime?
+  nextActionAt    DateTime?
+  nextActionLabel String?
+  wonAt        DateTime?
+  lostAt       DateTime?
+  lostReason   String?
+  source       String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  pipeline  Pipeline      @relation(fields: [pipelineId], references: [id])
+  stage     PipelineStage @relation(fields: [stageId], references: [id])
+  lead      Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner     User?         @relation("DealOwner", fields: [ownerId], references: [id])
+
+  history       DealStageHistory[]
+  tasks         Task[]
+  notes         Note[]
+  activities    Activity[]
+  proposals     Proposal[]
+  conversations Conversation[]
+  risks         DealRisk[]
+  money         MoneyEntry[]
+  bookings      Booking[]
+  nextBestActions NextBestAction[]
+
+  @@index([workspaceId, deletedAt, status])
+  @@index([workspaceId, stageId])
+  @@index([workspaceId, ownerId])
+  @@index([workspaceId, expectedCloseAt])
+  @@index([pipelineId, stageId, sortOrder])
+}
+
+model DealStageHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  dealId      String   @db.Uuid
+  fromStageId String?  @db.Uuid
+  toStageId   String   @db.Uuid
+  valueAtMove Decimal  @db.Decimal(14, 2)
+  daysInStage Int      @default(0)
+  actorType   ActorType @default(HUMAN)
+  actorUserId String?  @db.Uuid
+  note        String?
+  createdAt   DateTime @default(now())
+
+  deal    Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  toStage PipelineStage @relation(fields: [toStageId], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@index([dealId, createdAt])
+}
+
+model DealRisk {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  dealId      String   @db.Uuid
+  code        String
+  severity    String
+  title       String
+  explanation String
+  evidence    Json     @default("{}")
+  suggestedAction String?
+  resolvedAt  DateTime?
+  detectedAt  DateTime @default(now())
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, code])
+  @@index([workspaceId, severity])
+}
+
+/// Delivery/collection tracking, deliberately separate from pipeline value (§37).
+model MoneyEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  dealId      String   @db.Uuid
+  kind        String
+  amountInr   Decimal  @db.Decimal(14, 2)
+  reference   String?
+  dueAt       DateTime?
+  settledAt   DateTime?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, kind])
+  @@index([dealId])
+}
+
+// ---------------------------------------------------------------------------
+// WORK — TASKS, NOTES, ACTIVITY
+// ---------------------------------------------------------------------------
+
+model Task {
+  id           String       @id @default(uuid()) @db.Uuid
+  workspaceId  String       @db.Uuid
+  title        String
+  description  String?
+  status       TaskStatus   @default(QUEUED)
+  priority     TaskPriority @default(MEDIUM)
+  ownerId      String?      @db.Uuid
+  leadId       String?      @db.Uuid
+  companyId    String?      @db.Uuid
+  dealId       String?      @db.Uuid
+  proposalId   String?      @db.Uuid
+  bookingId    String?      @db.Uuid
+  channel      Channel?
+  dueAt        DateTime?
+  completedAt  DateTime?
+  snoozedUntil DateTime?
+  /// AI worklist ranking (§9) — never sorted by due date alone.
+  priorityScore Int         @default(0)
+  priorityReason String?
+  expectedImpactInr Decimal? @db.Decimal(14, 2)
+  recommendedAction String?
+  createdByAi  Boolean      @default(false)
+  lane         String       @default("QUEUED")
+  sortOrder    Int          @default(0)
+  revenueImpact String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner     User?     @relation("TaskOwner", fields: [ownerId], references: [id])
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  proposal  Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+
+  assignments  TaskAssignment[]
+  dependencies TaskDependency[] @relation("TaskDependent")
+  dependents   TaskDependency[] @relation("TaskPrerequisite")
+
+  @@index([workspaceId, deletedAt, status])
+  @@index([workspaceId, ownerId, status])
+  @@index([workspaceId, dueAt])
+  @@index([workspaceId, priorityScore])
+  @@index([workspaceId, lane, sortOrder])
+}
+
+model TaskAssignment {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  taskId      String   @db.Uuid
+  userId      String   @db.Uuid
+  role        String   @default("collaborator")
+  createdAt   DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([workspaceId, userId])
+}
+
+model TaskDependency {
+  id             String @id @default(uuid()) @db.Uuid
+  workspaceId    String @db.Uuid
+  taskId         String @db.Uuid
+  prerequisiteId String @db.Uuid
+
+  task         Task @relation("TaskDependent", fields: [taskId], references: [id], onDelete: Cascade)
+  prerequisite Task @relation("TaskPrerequisite", fields: [prerequisiteId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, prerequisiteId])
+  @@index([workspaceId])
+}
+
+model Note {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  body        String
+  authorId    String?   @db.Uuid
+  leadId      String?   @db.Uuid
+  companyId   String?   @db.Uuid
+  dealId      String?   @db.Uuid
+  isPinned    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User?     @relation(fields: [authorId], references: [id])
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, leadId])
+  @@index([workspaceId, dealId])
+  @@index([workspaceId, createdAt])
+}
+
+model StickyNote {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @db.Uuid
+  authorId    String         @db.Uuid
+  kind        StickyNoteKind @default(IDEA)
+  body        String
+  color       String         @default("amber")
+  isPinned    Boolean        @default(false)
+  archivedAt  DateTime?
+  leadId      String?        @db.Uuid
+  companyId   String?        @db.Uuid
+  dealId      String?        @db.Uuid
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, authorId, archivedAt])
+}
+
+/// Unified, filterable stream. actorType distinguishes human vs AI (§118).
+model Activity {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  kind        String
+  summary     String
+  detail      String?
+  actorType   ActorType @default(HUMAN)
+  actorUserId String?   @db.Uuid
+  actorAgentId String?  @db.Uuid
+  leadId      String?   @db.Uuid
+  companyId   String?   @db.Uuid
+  dealId      String?   @db.Uuid
+  channel     Channel?
+  amountInr   Decimal?  @db.Decimal(14, 2)
+  metadata    Json      @default("{}")
+  occurredAt  DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUser User?     @relation("ActivityActor", fields: [actorUserId], references: [id])
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, kind, occurredAt])
+  @@index([workspaceId, leadId, occurredAt])
+  @@index([workspaceId, actorType])
+}
+
+// ---------------------------------------------------------------------------
+// COMMUNICATION
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id          String            @id @default(uuid()) @db.Uuid
+  workspaceId String            @db.Uuid
+  channel     Channel
+  subject     String?
+  state       ConversationState @default(OPEN)
+  leadId      String?           @db.Uuid
+  companyId   String?           @db.Uuid
+  dealId      String?           @db.Uuid
+  assigneeId  String?           @db.Uuid
+  isUnread    Boolean           @default(false)
+  aiSummary   String?
+  sentiment   String?
+  lastMessageAt DateTime        @default(now())
+  snoozedUntil DateTime?
+  externalThreadId String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  messages  Message[]
+
+  @@index([workspaceId, state, lastMessageAt])
+  @@index([workspaceId, isUnread])
+  @@index([workspaceId, leadId])
+}
+
+model Message {
+  id             String           @id @default(uuid()) @db.Uuid
+  workspaceId    String           @db.Uuid
+  conversationId String           @db.Uuid
+  direction      MessageDirection
+  channel        Channel
+  state          MessageState     @default(DRAFT)
+  fromAddress    String?
+  toAddress      String?
+  subject        String?
+  body           String
+  bodyHtml       String?
+  actorType      ActorType        @default(HUMAN)
+  actorUserId    String?          @db.Uuid
+  generatedByAi  Boolean          @default(false)
+  aiModel        String?
+  sequenceStepId String?          @db.Uuid
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  bouncedAt      DateTime?
+  failureReason  String?
+  externalId     String?
+  idempotencyKey String?          @unique
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deletedAt      DateTime?
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sequenceStep SequenceStep? @relation(fields: [sequenceStepId], references: [id])
+
+  @@index([workspaceId, conversationId, createdAt])
+  @@index([workspaceId, state])
+  @@index([workspaceId, sentAt])
+}
+
+model Sequence {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  description String?
+  isActive    Boolean   @default(false)
+  stopOnReply Boolean   @default(true)
+  stopOnUnsubscribe Boolean @default(true)
+  sendWindowStart Int   @default(9)
+  sendWindowEnd   Int   @default(19)
+  sendDays    Int[]     @default([1, 2, 3, 4, 5])
+  timezone    String    @default("Asia/Kolkata")
+  dailyCap    Int       @default(50)
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  steps       SequenceStep[]
+  enrollments SequenceEnrollment[]
+
+  @@index([workspaceId, isActive])
+}
+
+model SequenceStep {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  sequenceId  String   @db.Uuid
+  stepOrder   Int
+  dayOffset   Int
+  channel     Channel
+  isManualTask Boolean @default(false)
+  subject     String?
+  bodyTemplate String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sequence Sequence  @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([sequenceId, stepOrder])
+  @@index([workspaceId])
+}
+
+model SequenceEnrollment {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  sequenceId  String    @db.Uuid
+  leadId      String    @db.Uuid
+  state       String    @default("active")
+  currentStep Int       @default(0)
+  nextSendAt  DateTime?
+  enrolledAt  DateTime  @default(now())
+  pausedAt    DateTime?
+  completedAt DateTime?
+  repliedAt   DateTime?
+  bouncedAt   DateTime?
+  stopReason  String?
+
+  sequence Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, leadId])
+  @@index([workspaceId, state])
+  @@index([nextSendAt])
+}
+
+/// Do-not-contact / opt-out registry, checked before every send (§104).
+model Suppression {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  kind        String
+  value       String
+  reason      String
+  source      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, kind, value])
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// PROPOSALS & BOOKINGS
+// ---------------------------------------------------------------------------
+
+model Proposal {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @db.Uuid
+  leadId      String?       @db.Uuid
+  companyId   String        @db.Uuid
+  dealId      String?       @db.Uuid
+  title       String
+  state       ProposalState @default(DRAFT)
+  publicToken String        @unique
+  currency    String        @default("INR")
+  subtotalInr Decimal       @db.Decimal(14, 2) @default(0)
+  taxRate     Decimal       @db.Decimal(5, 2)  @default(18)
+  taxInr      Decimal       @db.Decimal(14, 2) @default(0)
+  totalInr    Decimal       @db.Decimal(14, 2) @default(0)
+  sections    Json          @default("[]")
+  terms       String?
+  validUntil  DateTime?
+  sentAt      DateTime?
+  firstViewedAt DateTime?
+  lastViewedAt DateTime?
+  viewCount   Int           @default(0)
+  acceptedAt  DateTime?
+  declinedAt  DateTime?
+  createdById String?       @db.Uuid
+  generatedByAi Boolean     @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal      Deal?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  items     ProposalItem[]
+  views     ProposalView[]
+  tasks     Task[]
+
+  @@index([workspaceId, state])
+  @@index([workspaceId, dealId])
+}
+
+model ProposalItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  workspaceId String  @db.Uuid
+  proposalId  String  @db.Uuid
+  name        String
+  description String?
+  quantity    Decimal @db.Decimal(10, 2) @default(1)
+  unit        String  @default("item")
+  unitPriceInr Decimal @db.Decimal(14, 2)
+  amountInr   Decimal @db.Decimal(14, 2)
+  sortOrder   Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+  @@index([workspaceId])
+}
+
+model ProposalView {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  proposalId  String   @db.Uuid
+  viewedAt    DateTime @default(now())
+  durationSec Int?
+  ipHash      String?
+  userAgent   String?
+  city        String?
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId, viewedAt])
+  @@index([workspaceId])
+}
+
+model Booking {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  leadId      String?   @db.Uuid
+  dealId      String?   @db.Uuid
+  hostUserId  String?   @db.Uuid
+  title       String
+  state       String    @default("scheduled")
+  startsAt    DateTime
+  endsAt      DateTime
+  timezone    String    @default("Asia/Kolkata")
+  location    String?
+  meetingUrl  String?
+  provider    String?
+  externalId  String?
+  agenda      String?
+  briefJson   Json      @default("{}")
+  transcript  String?
+  aiSummary   String?
+  outcomes    Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, startsAt])
+  @@index([workspaceId, leadId])
+}
+
+// ---------------------------------------------------------------------------
+// ACCOUNTS INTELLIGENCE
+// ---------------------------------------------------------------------------
+
+model CommitteeMember {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @db.Uuid
+  companyId   String        @db.Uuid
+  personId    String        @db.Uuid
+  role        CommitteeRole @default(UNKNOWN)
+  isAiSuggested Boolean     @default(true)
+  confirmedAt DateTime?
+  influence   Int           @default(50)
+  sentiment   String?
+  note        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  person  Person  @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, personId])
+  @@index([workspaceId, companyId])
+}
+
+model Competitor {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  domain      String?
+  aliases     String[]
+  notes       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+}
+
+// ---------------------------------------------------------------------------
+// AI
+// ---------------------------------------------------------------------------
+
+model ResearchReport {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  leadId      String?  @db.Uuid
+  personId    String?  @db.Uuid
+  companyId   String?  @db.Uuid
+  depth       String   @default("deep")
+  state       RunState @default(PENDING)
+  pointsSpent Int      @default(0)
+  personSection      Json @default("{}")
+  companySection     Json @default("{}")
+  opportunitySection Json @default("{}")
+  outreachSection    Json @default("{}")
+  citations   Json     @default("[]")
+  confidence  Int      @default(0)
+  modelUsed   String?
+  requestedById String? @db.Uuid
+  requestedByAgentId String? @db.Uuid
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  errorMessage String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  person    Person?   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, leadId])
+  @@index([workspaceId, startedAt])
+}
+
+/// AI output is always stored with the evidence that produced it (§6, §115).
+model AIInsight {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @db.Uuid
+  kind        InsightKind
+  title       String
+  body        String
+  whyNow      String?
+  severity    String      @default("info")
+  evidence    Json        @default("[]")
+  leadId      String?     @db.Uuid
+  dealId      String?     @db.Uuid
+  forUserId   String?     @db.Uuid
+  modelUsed   String?
+  confidence  Int         @default(70)
+  validUntil  DateTime?
+  dismissedAt DateTime?
+  actedAt     DateTime?
+  feedback    String?
+  createdAt   DateTime    @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, kind, createdAt])
+  @@index([workspaceId, forUserId, dismissedAt])
+}
+
+model NextBestAction {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  leadId      String?  @db.Uuid
+  dealId      String?  @db.Uuid
+  action      String
+  label       String
+  rationale   String
+  rank        Int      @default(0)
+  score       Int      @default(0)
+  channel     Channel?
+  expectedImpactInr Decimal? @db.Decimal(14, 2)
+  chosenAt    DateTime?
+  rejectedAt  DateTime?
+  feedback    String?
+  computedAt  DateTime @default(now())
+
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  deal Deal? @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, leadId, rank])
+  @@index([workspaceId, dealId, rank])
+}
+
+model ReadinessItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  leadId      String   @db.Uuid
+  code        String
+  label       String
+  state       String
+  evidence    String?
+  sortOrder   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, code])
+  @@index([workspaceId])
+}
+
+model AIAgent {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @db.Uuid
+  kind        AgentKind
+  name        String
+  goal        String
+  isEnabled   Boolean       @default(false)
+  tools       String[]
+  approvalPolicy String     @default("review_first")
+  dailyPointBudget Int      @default(0)
+  dailyActionCap Int        @default(0)
+  config      Json          @default("{}")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      AgentRun[]
+
+  @@unique([workspaceId, kind])
+  @@index([workspaceId, isEnabled])
+}
+
+model AutopilotConfig {
+  id                String        @id @default(uuid()) @db.Uuid
+  workspaceId       String        @unique @db.Uuid
+  mode              AutopilotMode @default(OFF)
+  maxLeadsPerDay    Int           @default(20)
+  maxRevealsPerDay  Int           @default(5)
+  maxPointsPerDay   Int           @default(25)
+  maxEmailsPerDay   Int           @default(30)
+  maxWhatsappPerDay Int           @default(10)
+  maxLinkedinPerDay Int           @default(10)
+  allowedTiers      IcpTier[]     @default([A, B])
+  minScore          Int           @default(70)
+  allowedIndustries String[]
+  allowedLocations  String[]
+  allowedChannels   Channel[]     @default([EMAIL])
+  sendWindowStart   Int           @default(9)
+  sendWindowEnd     Int           @default(19)
+  sendDays          Int[]         @default([1, 2, 3, 4, 5])
+  blockedDomains    String[]
+  blockedCompanies  String[]
+  approvalThresholdInr Decimal    @db.Decimal(14, 2) @default(0)
+  requireApprovalForSpend Boolean @default(true)
+  updatedAt         DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model AgentRun {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  agentId     String   @db.Uuid
+  trigger     String
+  state       RunState @default(PENDING)
+  summary     String?
+  pointsSpent Int      @default(0)
+  actionsTaken Int     @default(0)
+  actionsHeld Int      @default(0)
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  errorMessage String?
+  idempotencyKey String? @unique
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent     AIAgent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  actions   AgentAction[]
+
+  @@index([workspaceId, startedAt])
+  @@index([agentId, startedAt])
+}
+
+model AgentAction {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  runId       String   @db.Uuid
+  sequence    Int
+  /// READ | WRITE | SPEND | EXTERNAL — risk class from §63
+  riskClass   String
+  tool        String
+  summary     String
+  input       Json     @default("{}")
+  output      Json     @default("{}")
+  state       String   @default("completed")
+  pointsSpent Int      @default(0)
+  requiresApproval Boolean @default(false)
+  approvedById String? @db.Uuid
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  leadId      String?  @db.Uuid
+  dealId      String?  @db.Uuid
+  occurredAt  DateTime @default(now())
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, state, requiresApproval])
+}
+
+model Playbook {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  description String?
+  triggerJson Json      @default("{}")
+  steps       Json      @default("[]")
+  isActive    Boolean   @default(false)
+  isAgentTriggerable Boolean @default(false)
+  timesRun    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, isActive])
+}
+
+model KnowledgeDoc {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  kind        String
+  title       String
+  body        String
+  tags        String[]
+  fileId      String?   @db.Uuid
+  isActive    Boolean   @default(true)
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, kind, isActive])
+}
+
+/// Per-request AI observability and cost tracking (§88).
+model AIRequestLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  feature      String
+  provider     String
+  model        String
+  promptKey    String?
+  latencyMs    Int
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  estimatedCostInr Decimal @db.Decimal(12, 4) @default(0)
+  success      Boolean  @default(true)
+  errorCode    String?
+  actorType    ActorType @default(HUMAN)
+  actorUserId  String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, feature])
+}
+
+// ---------------------------------------------------------------------------
+// PLATFORM
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id          String           @id @default(uuid()) @db.Uuid
+  workspaceId String           @db.Uuid
+  userId      String           @db.Uuid
+  kind        NotificationKind
+  title       String
+  body        String
+  severity    String           @default("info")
+  href        String?
+  leadId      String?          @db.Uuid
+  dealId      String?          @db.Uuid
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, readAt])
+  @@index([workspaceId, createdAt])
+}
+
+model AuditLog {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @db.Uuid
+  actorType   ActorType   @default(HUMAN)
+  actorUserId String?     @db.Uuid
+  actorLabel  String
+  source      AuditSource @default(UI)
+  action      String
+  objectType  String
+  objectId    String?
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  sessionId   String?
+  createdAt   DateTime    @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUser User?     @relation(fields: [actorUserId], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, objectType, objectId])
+  @@index([workspaceId, source])
+}
+
+/// Recycle bin index for soft-deleted rows (§82).
+model DeletedRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @db.Uuid
+  objectType    String
+  objectId      String
+  label         String
+  deletedByUserId String? @db.Uuid
+  deletedByLabel String
+  purgeAfter    DateTime
+  restoredAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, objectType, objectId])
+  @@index([workspaceId, purgeAfter])
+}
+
+model Webhook {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  url         String
+  events      String[]
+  secret      String
+  isActive    Boolean   @default(true)
+  lastStatus  Int?
+  lastDeliveryAt DateTime?
+  failureCount Int      @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace  Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId, isActive])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  webhookId   String   @db.Uuid
+  event       String
+  payload     Json
+  statusCode  Int?
+  attempt     Int      @default(1)
+  error       String?
+  deliveredAt DateTime?
+  nextRetryAt DateTime?
+  createdAt   DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  @@index([nextRetryAt])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  prefix      String
+  keyHash     String    @unique
+  scopes      String[]
+  createdById String?   @db.Uuid
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, revokedAt])
+}
+
+model File {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String
+  uploadedById String? @db.Uuid
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, deletedAt])
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  key         String
+  isEnabled   Boolean  @default(false)
+  rolloutPct  Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+}

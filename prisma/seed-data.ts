@@ -1,0 +1,717 @@
+/**
+ * Demo corpus. Every company and person here is fictional and exists only to
+ * make the product legible before a workspace has real data. Domains use
+ * .example so nothing can be mistaken for a real business or mailed by accident.
+ */
+
+export type SeedCompany = {
+  name: string;
+  domain: string;
+  industry: string;
+  subIndustry: string;
+  employeeCount: number;
+  revenueBandInr: string;
+  city: string;
+  state: string;
+  foundedYear: number;
+  technologies: string[];
+  description: string;
+};
+
+export const COMPANIES: SeedCompany[] = [
+  {
+    name: "Suryodaya Auto Components",
+    domain: "suryodaya-auto.example",
+    industry: "Manufacturing",
+    subIndustry: "Auto components",
+    employeeCount: 640,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Pune",
+    state: "Maharashtra",
+    foundedYear: 1996,
+    technologies: ["SAP ECC", "Excel", "Tally", "AutoCAD"],
+    description:
+      "Tier-2 supplier of precision machined components to commercial vehicle OEMs across western India.",
+  },
+  {
+    name: "Kaveri Logistics Network",
+    domain: "kaverilogistics.example",
+    industry: "Logistics",
+    subIndustry: "Third-party logistics",
+    employeeCount: 1180,
+    revenueBandInr: "₹500–1000 Cr",
+    city: "Chennai",
+    state: "Tamil Nadu",
+    foundedYear: 2004,
+    technologies: ["Oracle NetSuite", "Zoho CRM", "Google Workspace"],
+    description:
+      "Multi-modal freight and warehousing operator running 41 hubs across south and central India.",
+  },
+  {
+    name: "Bharat Nexus Fintech",
+    domain: "bharatnexus.example",
+    industry: "Fintech",
+    subIndustry: "Lending platform",
+    employeeCount: 310,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Bengaluru",
+    state: "Karnataka",
+    foundedYear: 2017,
+    technologies: ["Salesforce", "AWS", "Snowflake", "Segment"],
+    description: "Digital lending platform for MSMEs, operating across 14 states with an NBFC licence.",
+  },
+  {
+    name: "Anantha Textiles Group",
+    domain: "ananthatextiles.example",
+    industry: "Manufacturing",
+    subIndustry: "Textiles",
+    employeeCount: 2400,
+    revenueBandInr: "₹500–1000 Cr",
+    city: "Coimbatore",
+    state: "Tamil Nadu",
+    foundedYear: 1978,
+    technologies: ["SAP ECC", "Tally", "Excel"],
+    description: "Vertically integrated spinning, weaving and garmenting group exporting to 26 countries.",
+  },
+  {
+    name: "Rangoli Retail Ventures",
+    domain: "rangoliretail.example",
+    industry: "E-commerce",
+    subIndustry: "D2C retail",
+    employeeCount: 185,
+    revenueBandInr: "₹50–100 Cr",
+    city: "Mumbai",
+    state: "Maharashtra",
+    foundedYear: 2019,
+    technologies: ["Shopify Plus", "Klaviyo", "HubSpot", "Google Analytics"],
+    description: "Home and kitchen D2C brand group running four labels across marketplaces and own site.",
+  },
+  {
+    name: "Girnar Pharma Labs",
+    domain: "girnarpharma.example",
+    industry: "Healthcare",
+    subIndustry: "Pharmaceuticals",
+    employeeCount: 870,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Ahmedabad",
+    state: "Gujarat",
+    foundedYear: 1991,
+    technologies: ["SAP S/4HANA", "LIMS", "Veeva"],
+    description: "Formulations manufacturer with two USFDA-inspected facilities and a growing CDMO arm.",
+  },
+  {
+    name: "Chinar Cloud Systems",
+    domain: "chinarcloud.example",
+    industry: "IT Services",
+    subIndustry: "Managed services",
+    employeeCount: 420,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Gurugram",
+    state: "Haryana",
+    foundedYear: 2011,
+    technologies: ["AWS", "Azure", "Kubernetes", "Zoho CRM"],
+    description: "Cloud managed services provider serving BFSI and public sector clients in north India.",
+  },
+  {
+    name: "Vaigai Agritech",
+    domain: "vaigaiagritech.example",
+    industry: "SaaS",
+    subIndustry: "Agritech",
+    employeeCount: 145,
+    revenueBandInr: "₹25–50 Cr",
+    city: "Madurai",
+    state: "Tamil Nadu",
+    foundedYear: 2018,
+    technologies: ["Salesforce", "Twilio", "PostgreSQL", "Mixpanel"],
+    description: "Farm-to-market platform connecting 90,000 growers with institutional buyers.",
+  },
+  {
+    name: "Deccan Precision Works",
+    domain: "deccanprecision.example",
+    industry: "Manufacturing",
+    subIndustry: "Industrial equipment",
+    employeeCount: 380,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Hyderabad",
+    state: "Telangana",
+    foundedYear: 1988,
+    technologies: ["Oracle EBS", "SolidWorks", "Excel"],
+    description: "Manufacturer of hydraulic assemblies for mining and construction equipment makers.",
+  },
+  {
+    name: "Meghdoot Digital Labs",
+    domain: "meghdootdigital.example",
+    industry: "IT Services",
+    subIndustry: "Digital agency",
+    employeeCount: 96,
+    revenueBandInr: "₹10–25 Cr",
+    city: "Nashik",
+    state: "Maharashtra",
+    foundedYear: 2015,
+    technologies: ["WordPress", "Shopify", "HubSpot", "Figma"],
+    description: "Performance marketing and commerce build agency working with regional D2C brands.",
+  },
+  {
+    name: "Saptagiri Infra Projects",
+    domain: "saptagiriinfra.example",
+    industry: "Construction",
+    subIndustry: "Infrastructure",
+    employeeCount: 1620,
+    revenueBandInr: "₹500–1000 Cr",
+    city: "Vijayawada",
+    state: "Andhra Pradesh",
+    foundedYear: 1994,
+    technologies: ["SAP ECC", "Primavera", "Excel", "Tally"],
+    description: "EPC contractor delivering road, water and urban infrastructure projects in south India.",
+  },
+  {
+    name: "Tapti Foods & Beverages",
+    domain: "taptifoods.example",
+    industry: "Manufacturing",
+    subIndustry: "FMCG",
+    employeeCount: 920,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Indore",
+    state: "Madhya Pradesh",
+    foundedYear: 2001,
+    technologies: ["Microsoft Dynamics NAV", "Tally", "Excel"],
+    description: "Packaged snacks and beverage manufacturer distributing across central and west India.",
+  },
+  {
+    name: "Arcadia Consulting Partners",
+    domain: "arcadiaconsulting.example",
+    industry: "Consulting",
+    subIndustry: "Management consulting",
+    employeeCount: 210,
+    revenueBandInr: "₹50–100 Cr",
+    city: "Mumbai",
+    state: "Maharashtra",
+    foundedYear: 2009,
+    technologies: ["Salesforce", "Microsoft 365", "Tableau"],
+    description: "Mid-market advisory practice focused on operations and digital transformation.",
+  },
+  {
+    name: "Nilgiri Edulearn",
+    domain: "nilgiriedulearn.example",
+    industry: "SaaS",
+    subIndustry: "Edtech",
+    employeeCount: 265,
+    revenueBandInr: "₹50–100 Cr",
+    city: "Bengaluru",
+    state: "Karnataka",
+    foundedYear: 2016,
+    technologies: ["HubSpot", "AWS", "Amplitude", "Zoom"],
+    description: "Skilling platform for engineering graduates with campus and enterprise offerings.",
+  },
+  {
+    name: "Konkan Marine Exports",
+    domain: "konkanmarine.example",
+    industry: "Manufacturing",
+    subIndustry: "Food processing",
+    employeeCount: 540,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Ratnagiri",
+    state: "Maharashtra",
+    foundedYear: 1986,
+    technologies: ["Tally", "Excel", "Busy"],
+    description: "Seafood processing and export business shipping to EU and Japanese buyers.",
+  },
+  {
+    name: "Aravalli Steel Traders",
+    domain: "aravallisteel.example",
+    industry: "Distribution",
+    subIndustry: "Metals trading",
+    employeeCount: 275,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Jaipur",
+    state: "Rajasthan",
+    foundedYear: 1999,
+    technologies: ["Tally", "Excel", "WhatsApp Business"],
+    description: "Steel and alloy distributor supplying fabricators across Rajasthan and Delhi NCR.",
+  },
+  {
+    name: "Periyar HealthTech",
+    domain: "periyarhealthtech.example",
+    industry: "Healthcare",
+    subIndustry: "Hospital chain",
+    employeeCount: 1350,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Kochi",
+    state: "Kerala",
+    foundedYear: 2007,
+    technologies: ["Epic", "Salesforce Health Cloud", "Azure"],
+    description: "Multi-specialty hospital network with eight facilities across Kerala.",
+  },
+  {
+    name: "Yamuna Apparel Mills",
+    domain: "yamunaapparel.example",
+    industry: "Manufacturing",
+    subIndustry: "Apparel",
+    employeeCount: 1780,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Noida",
+    state: "Uttar Pradesh",
+    foundedYear: 1992,
+    technologies: ["SAP ECC", "Excel", "Tally"],
+    description: "Contract apparel manufacturer producing for European and US retail brands.",
+  },
+  {
+    name: "Brahmaputra Energy Services",
+    domain: "brahmaputraenergy.example",
+    industry: "Energy",
+    subIndustry: "Renewables",
+    employeeCount: 430,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Guwahati",
+    state: "Assam",
+    foundedYear: 2013,
+    technologies: ["Oracle NetSuite", "SCADA", "Power BI"],
+    description: "Solar EPC and O&M provider operating 340 MW across the north-east and east.",
+  },
+  {
+    name: "Sahyadri Cold Chain",
+    domain: "sahyadricoldchain.example",
+    industry: "Logistics",
+    subIndustry: "Cold chain",
+    employeeCount: 610,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Pune",
+    state: "Maharashtra",
+    foundedYear: 2010,
+    technologies: ["Zoho One", "Excel", "IoT telemetry"],
+    description: "Temperature-controlled warehousing and transport for pharma and fresh produce.",
+  },
+  {
+    name: "Charminar Software Guild",
+    domain: "charminarsoftware.example",
+    industry: "IT Services",
+    subIndustry: "Software development",
+    employeeCount: 320,
+    revenueBandInr: "₹50–100 Cr",
+    city: "Hyderabad",
+    state: "Telangana",
+    foundedYear: 2012,
+    technologies: ["Azure DevOps", ".NET", "Salesforce", "Jira"],
+    description: "Product engineering services firm working with US healthcare and insurance ISVs.",
+  },
+  {
+    name: "Godavari Chemicals",
+    domain: "godavarichem.example",
+    industry: "Manufacturing",
+    subIndustry: "Specialty chemicals",
+    employeeCount: 760,
+    revenueBandInr: "₹250–500 Cr",
+    city: "Nagpur",
+    state: "Maharashtra",
+    foundedYear: 1984,
+    technologies: ["SAP S/4HANA", "LIMS", "Excel"],
+    description: "Specialty chemical intermediates producer serving agro and pharma customers.",
+  },
+  {
+    name: "Bandra Creative Studio",
+    domain: "bandracreative.example",
+    industry: "IT Services",
+    subIndustry: "Creative agency",
+    employeeCount: 68,
+    revenueBandInr: "₹10–25 Cr",
+    city: "Mumbai",
+    state: "Maharashtra",
+    foundedYear: 2017,
+    technologies: ["Figma", "Webflow", "HubSpot", "Notion"],
+    description: "Brand and content studio serving consumer internet and hospitality clients.",
+  },
+  {
+    name: "Vindhya Insurance Broking",
+    domain: "vindhyainsure.example",
+    industry: "Financial Services",
+    subIndustry: "Insurance broking",
+    employeeCount: 340,
+    revenueBandInr: "₹50–100 Cr",
+    city: "Bhopal",
+    state: "Madhya Pradesh",
+    foundedYear: 2006,
+    technologies: ["Salesforce", "Excel", "Zoho Desk"],
+    description: "Corporate insurance broker handling employee benefits and commercial lines.",
+  },
+  {
+    name: "Cauvery Water Tech",
+    domain: "cauverywatertech.example",
+    industry: "Manufacturing",
+    subIndustry: "Water treatment",
+    employeeCount: 290,
+    revenueBandInr: "₹50–100 Cr",
+    city: "Mysuru",
+    state: "Karnataka",
+    foundedYear: 2008,
+    technologies: ["Oracle EBS", "SCADA", "Excel"],
+    description: "Industrial water and effluent treatment plant builder and operator.",
+  },
+  {
+    name: "Rohtang Travel Collective",
+    domain: "rohtangtravel.example",
+    industry: "Hospitality",
+    subIndustry: "Travel",
+    employeeCount: 155,
+    revenueBandInr: "₹25–50 Cr",
+    city: "Chandigarh",
+    state: "Punjab",
+    foundedYear: 2014,
+    technologies: ["Zoho CRM", "Razorpay", "WhatsApp Business"],
+    description: "Experiential travel operator running curated Himalayan and Northeast itineraries.",
+  },
+  {
+    name: "Salcete Hospitality Group",
+    domain: "salcetehospitality.example",
+    industry: "Hospitality",
+    subIndustry: "Hotels",
+    employeeCount: 720,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Panaji",
+    state: "Goa",
+    foundedYear: 2003,
+    technologies: ["Opera PMS", "Salesforce", "Excel"],
+    description: "Boutique hotel and resort operator with eleven properties across Goa and Konkan.",
+  },
+  {
+    name: "Rann Solar Manufacturing",
+    domain: "rannsolar.example",
+    industry: "Manufacturing",
+    subIndustry: "Solar modules",
+    employeeCount: 1140,
+    revenueBandInr: "₹500–1000 Cr",
+    city: "Surat",
+    state: "Gujarat",
+    foundedYear: 2015,
+    technologies: ["SAP S/4HANA", "MES", "Power BI"],
+    description: "PV module manufacturer with 2.4 GW annual capacity serving domestic EPC demand.",
+  },
+  {
+    name: "Hooghly Jute Industries",
+    domain: "hooghlyjute.example",
+    industry: "Manufacturing",
+    subIndustry: "Jute and packaging",
+    employeeCount: 1950,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Kolkata",
+    state: "West Bengal",
+    foundedYear: 1962,
+    technologies: ["Tally", "Excel", "Busy"],
+    description: "Jute goods manufacturer supplying government procurement and export markets.",
+  },
+  {
+    name: "Zephyr Mobility Labs",
+    domain: "zephyrmobility.example",
+    industry: "SaaS",
+    subIndustry: "Mobility",
+    employeeCount: 178,
+    revenueBandInr: "₹25–50 Cr",
+    city: "Bengaluru",
+    state: "Karnataka",
+    foundedYear: 2020,
+    technologies: ["Salesforce", "GCP", "Looker", "Segment"],
+    description: "Fleet electrification and telematics platform for last-mile delivery operators.",
+  },
+  {
+    name: "Mandvi Exports House",
+    domain: "mandviexports.example",
+    industry: "Distribution",
+    subIndustry: "Trading and export",
+    employeeCount: 240,
+    revenueBandInr: "₹100–250 Cr",
+    city: "Rajkot",
+    state: "Gujarat",
+    foundedYear: 1997,
+    technologies: ["Tally", "Excel", "WhatsApp Business"],
+    description: "Engineering goods exporter serving Middle East and African distributors.",
+  },
+  {
+    name: "Elbrus Capital Advisors",
+    domain: "elbruscapital.example",
+    industry: "Financial Services",
+    subIndustry: "Wealth management",
+    employeeCount: 130,
+    revenueBandInr: "₹25–50 Cr",
+    city: "Delhi",
+    state: "Delhi",
+    foundedYear: 2011,
+    technologies: ["Salesforce Financial Services Cloud", "Excel", "Power BI"],
+    description: "Boutique wealth advisory managing portfolios for founders and family offices.",
+  },
+];
+
+export const FIRST_NAMES_M = [
+  "Rahul", "Arjun", "Vikram", "Aditya", "Karthik", "Siddharth", "Nikhil", "Rohan", "Amit", "Pranav",
+  "Harsh", "Kunal", "Manish", "Sandeep", "Varun", "Girish", "Anand", "Suresh", "Deepak", "Rajiv",
+  "Vivek", "Abhishek", "Naveen", "Prakash", "Sanjay", "Tushar", "Yash", "Gaurav", "Hemant", "Mohit",
+  "Ravi", "Sameer", "Ashwin", "Dinesh", "Jatin", "Nitin", "Parth", "Rakesh", "Shyam", "Vishal",
+];
+
+export const FIRST_NAMES_F = [
+  "Priya", "Ananya", "Divya", "Meera", "Kavya", "Shruti", "Neha", "Pooja", "Aarti", "Sneha",
+  "Ritika", "Lakshmi", "Deepika", "Swati", "Anjali", "Radhika", "Nisha", "Payal", "Sonal", "Vidya",
+  "Bhavna", "Ishita", "Manisha", "Rupali", "Tanvi", "Aishwarya", "Gayatri", "Jyoti", "Komal", "Preeti",
+];
+
+export const LAST_NAMES = [
+  "Sharma", "Iyer", "Patel", "Deshpande", "Nair", "Reddy", "Gupta", "Mehta", "Kulkarni", "Rao",
+  "Banerjee", "Chauhan", "Joshi", "Menon", "Bhatia", "Shetty", "Agarwal", "Pillai", "Kapoor", "Naidu",
+  "Chatterjee", "Sinha", "Malhotra", "Ghosh", "Jain", "Saxena", "Trivedi", "Bose", "Verma", "Hegde",
+  "Subramanian", "Thakur", "Pandey", "Krishnan", "Mishra", "Dutta", "Bhandari", "Rathore", "Sequeira", "Kamath",
+];
+
+export type RoleTemplate = {
+  title: string;
+  department: string;
+  seniority: string;
+  isDecisionMaker: boolean;
+};
+
+export const ROLE_TEMPLATES: RoleTemplate[] = [
+  { title: "Founder & CEO", department: "Executive", seniority: "founder", isDecisionMaker: true },
+  { title: "Managing Director", department: "Executive", seniority: "c-level", isDecisionMaker: true },
+  { title: "Chief Technology Officer", department: "Technology", seniority: "c-level", isDecisionMaker: true },
+  { title: "Chief Financial Officer", department: "Finance", seniority: "c-level", isDecisionMaker: true },
+  { title: "Chief Operating Officer", department: "Operations", seniority: "c-level", isDecisionMaker: true },
+  { title: "VP Sales", department: "Sales", seniority: "vp", isDecisionMaker: true },
+  { title: "VP Engineering", department: "Technology", seniority: "vp", isDecisionMaker: true },
+  { title: "Head of IT", department: "Technology", seniority: "head", isDecisionMaker: true },
+  { title: "Director of Operations", department: "Operations", seniority: "director", isDecisionMaker: true },
+  { title: "Director of Finance", department: "Finance", seniority: "director", isDecisionMaker: true },
+  { title: "IT Manager", department: "Technology", seniority: "manager", isDecisionMaker: false },
+  { title: "CRM Manager", department: "Technology", seniority: "manager", isDecisionMaker: false },
+  { title: "ERP Programme Manager", department: "Technology", seniority: "manager", isDecisionMaker: true },
+  { title: "Head of Digital Transformation", department: "Technology", seniority: "head", isDecisionMaker: true },
+  { title: "Procurement Head", department: "Procurement", seniority: "head", isDecisionMaker: true },
+  { title: "General Manager — Supply Chain", department: "Operations", seniority: "senior_manager", isDecisionMaker: false },
+  { title: "Senior Manager — Business Systems", department: "Technology", seniority: "senior_manager", isDecisionMaker: false },
+  { title: "Marketing Head", department: "Marketing", seniority: "head", isDecisionMaker: false },
+  { title: "Sales Operations Lead", department: "Sales", seniority: "lead", isDecisionMaker: false },
+  { title: "Business Analyst", department: "Technology", seniority: "individual", isDecisionMaker: false },
+];
+
+export type SignalTemplate = {
+  type: string;
+  sourceKind: string;
+  sourceName: string;
+  title: string;
+  excerpt: string;
+  keywords: string[];
+  confidence: number;
+  suggestedAction: string;
+  interpretation: string;
+};
+
+export const SIGNAL_TEMPLATES: SignalTemplate[] = [
+  {
+    type: "SOCIAL_POST",
+    sourceKind: "SOCIAL_PUBLIC",
+    sourceName: "Public professional post",
+    title: "Publicly asking for Salesforce implementation partners",
+    excerpt:
+      "We're shortlisting Salesforce implementation partners for a rollout across our sales and service teams. Want deployment done this quarter. Recommendations welcome.",
+    keywords: ["salesforce", "implementation", "partner", "this quarter", "shortlist"],
+    confidence: 92,
+    suggestedAction: "Reach out today referencing their quarter-end deadline, not your feature list.",
+    interpretation:
+      "Explicit, time-boxed buying intent from a named decision maker. This is the strongest class of signal in the system.",
+  },
+  {
+    type: "HIRING",
+    sourceKind: "JOB_BOARD",
+    sourceName: "Company careers page",
+    title: "Hiring a Salesforce Administrator",
+    excerpt:
+      "Open role: Salesforce Administrator (3–6 yrs). Responsibilities include supporting an upcoming CRM migration and managing integrations with our ERP.",
+    keywords: ["salesforce administrator", "crm migration", "erp", "integration"],
+    confidence: 78,
+    suggestedAction: "Offer a migration readiness assessment — they are staffing up for a project already approved.",
+    interpretation:
+      "Hiring for a specific administrator role usually means the platform decision is already made and budget exists.",
+  },
+  {
+    type: "SOCIAL_POST",
+    sourceKind: "SOCIAL_PUBLIC",
+    sourceName: "Public professional post",
+    title: "Frustrated with current ERP reporting",
+    excerpt:
+      "Third month running where closing the books took two weeks because our ERP reporting can't handle multi-plant consolidation. Something has to change.",
+    keywords: ["erp", "reporting", "consolidation", "multi-plant"],
+    confidence: 74,
+    suggestedAction: "Lead with the month-end close problem and a comparable manufacturing case study.",
+    interpretation:
+      "Named operational pain without a stated timeline. Real need, but qualify urgency before investing heavily.",
+  },
+  {
+    type: "TECH_CHANGE",
+    sourceKind: "PUBLIC_WEB",
+    sourceName: "Technology footprint scan",
+    title: "Added a data warehouse to their stack",
+    excerpt:
+      "New Snowflake instance detected alongside existing CRM. Previously reported only spreadsheet-based reporting.",
+    keywords: ["snowflake", "data warehouse", "analytics"],
+    confidence: 66,
+    suggestedAction: "Position integration and reporting services around the warehouse they just bought.",
+    interpretation:
+      "Investment in adjacent tooling signals an active data programme with budget already released.",
+  },
+  {
+    type: "RFP",
+    sourceKind: "TENDER_PORTAL",
+    sourceName: "Public tender portal",
+    title: "Published a tender for ERP modernisation",
+    excerpt:
+      "Request for proposals: ERP modernisation and migration, including finance, inventory and plant maintenance modules. Submission deadline in 21 days.",
+    keywords: ["rfp", "erp", "modernisation", "migration", "deadline"],
+    confidence: 96,
+    suggestedAction: "Confirm eligibility today — the submission window is the binding constraint.",
+    interpretation:
+      "A formal published tender. Highest-confidence intent available, but competitive and deadline-driven.",
+  },
+  {
+    type: "FUNDING",
+    sourceKind: "NEWS",
+    sourceName: "Business press",
+    title: "Raised a Series B round",
+    excerpt:
+      "Closed a ₹180 crore Series B led by an institutional investor, earmarked for technology and market expansion.",
+    keywords: ["funding", "series b", "expansion", "technology"],
+    confidence: 88,
+    suggestedAction: "Time outreach 3–5 weeks post-announcement, when budget planning actually starts.",
+    interpretation: "Funding indicates capacity to spend, not intent to buy. Treat as a budget signal only.",
+  },
+  {
+    type: "ANNOUNCEMENT",
+    sourceKind: "COMPANY_SITE",
+    sourceName: "Company newsroom",
+    title: "Announced a new manufacturing facility",
+    excerpt:
+      "Board approved a new plant in Gujarat, operational within 14 months, expected to add 40% to production capacity.",
+    keywords: ["new plant", "capacity", "expansion", "greenfield"],
+    confidence: 72,
+    suggestedAction: "New facilities need systems. Open with the greenfield rollout, not a replacement pitch.",
+    interpretation: "Physical expansion reliably creates downstream systems and integration work.",
+  },
+  {
+    type: "JOB_CHANGE",
+    sourceKind: "SOCIAL_PUBLIC",
+    sourceName: "Public profile change",
+    title: "New CTO joined from a larger enterprise",
+    excerpt:
+      "Started as Chief Technology Officer, previously led platform engineering at a larger listed company.",
+    keywords: ["new cto", "leadership change", "platform"],
+    confidence: 70,
+    suggestedAction: "New technology leaders re-evaluate vendors in their first 90 days. Reach out inside that window.",
+    interpretation:
+      "Leadership change is a reliable window of vendor reconsideration, independent of stated intent.",
+  },
+  {
+    type: "COMPETITOR_MENTION",
+    sourceKind: "SOCIAL_PUBLIC",
+    sourceName: "Public professional post",
+    title: "Publicly comparing two implementation vendors",
+    excerpt:
+      "Anyone worked with both of the large SI firms on a mid-market Salesforce rollout? Struggling to justify the pricing difference.",
+    keywords: ["comparison", "pricing", "systems integrator", "salesforce"],
+    confidence: 82,
+    suggestedAction: "This is a displacement opening. Lead with transparent commercials, not capability claims.",
+    interpretation:
+      "Active evaluation with visible dissatisfaction about price. Strong displacement opportunity.",
+  },
+  {
+    type: "WEBSITE_UPDATE",
+    sourceKind: "COMPANY_SITE",
+    sourceName: "Website change monitor",
+    title: "Added a careers section for a digital team",
+    excerpt:
+      "Six new digital and data roles published, including two integration engineers and a business systems analyst.",
+    keywords: ["hiring", "digital team", "integration", "data"],
+    confidence: 58,
+    suggestedAction: "Worth watching rather than contacting. Add to Radar and wait for a stronger signal.",
+    interpretation:
+      "Weak, inferential signal. Useful as supporting evidence but not enough to justify outreach alone.",
+  },
+  {
+    type: "NEWS",
+    sourceKind: "NEWS",
+    sourceName: "Trade publication",
+    title: "Named in an industry consolidation report",
+    excerpt:
+      "Listed among mid-market players expected to pursue acquisitions in the coming 18 months.",
+    keywords: ["acquisition", "consolidation", "m&a"],
+    confidence: 52,
+    suggestedAction: "Note for context. Post-merger systems consolidation is a future opportunity, not a current one.",
+    interpretation: "Speculative third-party commentary. Low confidence; do not treat as intent.",
+  },
+  {
+    type: "SOCIAL_COMMENT",
+    sourceKind: "SOCIAL_PUBLIC",
+    sourceName: "Public comment thread",
+    title: "Asked about AI automation for order processing",
+    excerpt:
+      "Has anyone actually deployed AI for order intake at scale? We process 4,000 purchase orders a month, mostly over email and WhatsApp.",
+    keywords: ["ai automation", "order processing", "whatsapp", "email"],
+    confidence: 80,
+    suggestedAction: "Quantified pain and a named channel. Respond with a specific, small first project.",
+    interpretation:
+      "Specific operational problem with volumes stated. Quantified pain converts far better than generic interest.",
+  },
+];
+
+export const KNOWLEDGE_DOCS = [
+  {
+    kind: "service",
+    title: "Salesforce implementation and migration",
+    tags: ["salesforce", "crm", "implementation"],
+    body:
+      "End-to-end Salesforce Sales Cloud and Service Cloud implementation for Indian mid-market businesses. Typical engagement: 10–16 weeks, ₹18–45 lakh depending on object count, integration surface and data migration volume. Includes discovery, configuration, data migration, integration with ERP or Tally, user training in English and one regional language, and 60 days of hypercare.",
+  },
+  {
+    kind: "service",
+    title: "ERP modernisation and integration",
+    tags: ["erp", "sap", "netsuite", "integration"],
+    body:
+      "Migration and modernisation across SAP ECC to S/4HANA, Oracle NetSuite and Microsoft Dynamics. We do not resell licences. Scope covers process mapping, data cleansing, integration middleware, cutover planning and post-go-live stabilisation. Typical engagement: 16–32 weeks, ₹35 lakh to ₹1.6 crore.",
+  },
+  {
+    kind: "service",
+    title: "AI automation for document and order workflows",
+    tags: ["ai", "automation", "document processing"],
+    body:
+      "Automates order intake, invoice matching and document extraction where volumes exceed roughly 1,000 documents a month. Deployed as a bounded pilot first: one workflow, 6 weeks, ₹6–12 lakh, with an accuracy threshold agreed before we start. We decline engagements where the volume does not justify the build.",
+  },
+  {
+    kind: "case_study",
+    title: "Auto components supplier — Salesforce rollout in 11 weeks",
+    tags: ["salesforce", "manufacturing", "case study"],
+    body:
+      "A 600-person auto components manufacturer in Pune ran sales on spreadsheets with no view of enquiry-to-order conversion. We implemented Sales Cloud with SAP integration in 11 weeks. Quote turnaround fell from 6 days to 1.5 days; enquiry conversion improved from 14% to 22% over the following two quarters. Fictional reference used for demonstration.",
+  },
+  {
+    kind: "case_study",
+    title: "Cold chain operator — NetSuite consolidation across 41 sites",
+    tags: ["netsuite", "logistics", "case study"],
+    body:
+      "A cold chain logistics operator ran four disconnected systems across 41 hubs. We consolidated onto NetSuite over 24 weeks with a phased hub-by-hub cutover. Month-end close went from 14 days to 4. Fictional reference used for demonstration.",
+  },
+  {
+    kind: "battlecard",
+    title: "Competing against large systems integrators",
+    tags: ["competitive", "pricing", "battlecard"],
+    body:
+      "Large SI firms win on perceived risk reduction and lose on price, partner-level attention and timeline. Where a prospect is comparing us against a large SI: do not attack their capability. Lead with named senior people on the engagement, a fixed-scope first phase, and a published weekly progress cadence. Never claim a capability we do not have — see the services documents for what is actually in scope.",
+  },
+  {
+    kind: "objection",
+    title: "\"Your team is too small for our rollout\"",
+    tags: ["objection", "sales"],
+    body:
+      "Acknowledge it directly — we are 40 people, not 4,000. Reframe around phase one: propose a bounded first phase that one senior team can demonstrably deliver, with an agreed exit point if it does not go well. Offer a reference call with a client of comparable size. Do not counter by overstating headcount.",
+  },
+  {
+    kind: "pricing",
+    title: "Commercial guardrails",
+    tags: ["pricing", "terms"],
+    body:
+      "Standard commercial terms: 30% on signature, 40% at design sign-off, 30% on go-live. GST at 18% applies on all services. Payment terms net 30. Discounts beyond 8% require director approval. Proposals expire 21 days from issue. Do not quote outside these bands without approval.",
+  },
+];

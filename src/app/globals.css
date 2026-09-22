@@ -1,0 +1,469 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   SIGNALROOM DESIGN TOKENS
+   Semantic only. Components never reference a raw colour — they reference a
+   role (surface, border, intent-hot, tier-a). Swapping the palette is a
+   single-file change.
+   ========================================================================== */
+
+:root {
+  /* --- neutral scaffolding ------------------------------------------------ */
+  --background: oklch(0.985 0.002 250);
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.968 0.003 250);
+  --surface-hover: oklch(0.965 0.004 250);
+  --surface-active: oklch(0.945 0.006 250);
+
+  --border: oklch(0.905 0.005 250);
+  --border-strong: oklch(0.845 0.008 250);
+  --border-subtle: oklch(0.945 0.004 250);
+
+  --text-primary: oklch(0.215 0.012 255);
+  --text-secondary: oklch(0.455 0.012 255);
+  --text-muted: oklch(0.605 0.011 255);
+  --text-inverse: oklch(0.99 0 0);
+
+  /* --- brand: jade. Operational and money-adjacent, deliberately not the
+         generic "AI purple" (§90). ------------------------------------------ */
+  --brand: oklch(0.545 0.098 186);
+  --brand-hover: oklch(0.495 0.098 186);
+  --brand-active: oklch(0.455 0.095 186);
+  --brand-subtle: oklch(0.955 0.022 186);
+  --brand-subtle-hover: oklch(0.925 0.032 186);
+  --brand-border: oklch(0.845 0.055 186);
+  --brand-text: oklch(0.415 0.085 186);
+  --brand-fg: oklch(0.99 0 0);
+
+  /* --- status ------------------------------------------------------------- */
+  --success: oklch(0.565 0.135 152);
+  --success-subtle: oklch(0.955 0.035 152);
+  --success-border: oklch(0.845 0.075 152);
+  --success-text: oklch(0.435 0.115 152);
+
+  --warning: oklch(0.715 0.155 68);
+  --warning-subtle: oklch(0.965 0.04 78);
+  --warning-border: oklch(0.87 0.09 72);
+  --warning-text: oklch(0.505 0.115 62);
+
+  --danger: oklch(0.575 0.195 22);
+  --danger-subtle: oklch(0.96 0.025 22);
+  --danger-border: oklch(0.86 0.07 22);
+  --danger-text: oklch(0.475 0.175 22);
+
+  --info: oklch(0.585 0.135 250);
+  --info-subtle: oklch(0.96 0.025 250);
+  --info-border: oklch(0.855 0.065 250);
+  --info-text: oklch(0.475 0.135 250);
+
+  /* --- buyer intent temperature scale (§23) ------------------------------- */
+  --intent-cold: oklch(0.585 0.025 250);
+  --intent-cold-subtle: oklch(0.955 0.008 250);
+  --intent-aware: oklch(0.615 0.115 232);
+  --intent-aware-subtle: oklch(0.955 0.03 232);
+  --intent-warm: oklch(0.735 0.145 78);
+  --intent-warm-subtle: oklch(0.965 0.045 78);
+  --intent-hot: oklch(0.655 0.185 42);
+  --intent-hot-subtle: oklch(0.955 0.05 42);
+  --intent-buying: oklch(0.575 0.21 18);
+  --intent-buying-subtle: oklch(0.955 0.045 18);
+
+  /* --- ICP tier indicators (§91) ------------------------------------------ */
+  --tier-a: oklch(0.545 0.098 186);
+  --tier-b: oklch(0.585 0.115 245);
+  --tier-c: oklch(0.585 0.022 255);
+  --tier-d: oklch(0.685 0.012 255);
+
+  /* --- data visualisation ------------------------------------------------
+     Categorical: a fixed 4-slot order, never cycled. These exact values pass
+     the six-check validator in --pairs all mode (lightness band, chroma floor,
+     CVD separation, normal-vision floor, contrast). Do not hand-tune them
+     without re-running scripts/validate_palette.js.
+     Sequential: one hue, monotone lightness, for magnitude (the heatmap).
+     Status colours live in the --success/--warning/--danger tokens above and
+     are never reused as a series colour.                                     */
+  --chart-1: oklch(0.615 0.17 185);
+  --chart-2: oklch(0.63 0.15 68);
+  --chart-3: oklch(0.52 0.19 250);
+  --chart-4: oklch(0.52 0.18 340);
+
+  --seq-1: oklch(0.95 0.02 185);
+  --seq-2: oklch(0.88 0.05 185);
+  --seq-3: oklch(0.79 0.08 185);
+  --seq-4: oklch(0.7 0.11 185);
+  --seq-5: oklch(0.6 0.14 185);
+  --seq-6: oklch(0.5 0.13 185);
+
+  --chart-grid: oklch(0.915 0.005 250);
+  --chart-axis: oklch(0.645 0.01 250);
+
+  /* --- AI surfaces: a distinct but restrained treatment ------------------- */
+  --ai-surface: oklch(0.975 0.014 200);
+  --ai-border: oklch(0.895 0.035 200);
+  --ai-accent: oklch(0.525 0.09 200);
+
+  --ring: oklch(0.545 0.098 186);
+  --overlay: oklch(0.21 0.015 255 / 0.45);
+
+  --radius: 0.5rem;
+  --shadow-color: 220 25% 15%;
+}
+
+.dark {
+  --background: oklch(0.165 0.008 255);
+  --surface: oklch(0.198 0.009 255);
+  --surface-raised: oklch(0.232 0.01 255);
+  --surface-sunken: oklch(0.145 0.008 255);
+  --surface-hover: oklch(0.252 0.011 255);
+  --surface-active: oklch(0.285 0.012 255);
+
+  --border: oklch(0.295 0.011 255);
+  --border-strong: oklch(0.375 0.013 255);
+  --border-subtle: oklch(0.245 0.01 255);
+
+  --text-primary: oklch(0.965 0.003 255);
+  --text-secondary: oklch(0.755 0.011 255);
+  --text-muted: oklch(0.585 0.013 255);
+  --text-inverse: oklch(0.175 0.01 255);
+
+  --brand: oklch(0.685 0.105 186);
+  --brand-hover: oklch(0.745 0.105 186);
+  --brand-active: oklch(0.785 0.1 186);
+  --brand-subtle: oklch(0.275 0.038 186);
+  --brand-subtle-hover: oklch(0.315 0.048 186);
+  --brand-border: oklch(0.395 0.058 186);
+  --brand-text: oklch(0.775 0.095 186);
+  --brand-fg: oklch(0.155 0.02 186);
+
+  --success: oklch(0.695 0.145 152);
+  --success-subtle: oklch(0.265 0.045 152);
+  --success-border: oklch(0.375 0.07 152);
+  --success-text: oklch(0.775 0.125 152);
+
+  --warning: oklch(0.785 0.155 72);
+  --warning-subtle: oklch(0.285 0.05 68);
+  --warning-border: oklch(0.415 0.08 70);
+  --warning-text: oklch(0.845 0.13 76);
+
+  --danger: oklch(0.665 0.19 22);
+  --danger-subtle: oklch(0.275 0.055 22);
+  --danger-border: oklch(0.395 0.09 22);
+  --danger-text: oklch(0.785 0.135 22);
+
+  --info: oklch(0.695 0.135 250);
+  --info-subtle: oklch(0.265 0.05 250);
+  --info-border: oklch(0.375 0.08 250);
+  --info-text: oklch(0.805 0.105 250);
+
+  --intent-cold: oklch(0.655 0.022 250);
+  --intent-cold-subtle: oklch(0.255 0.008 250);
+  --intent-aware: oklch(0.705 0.115 232);
+  --intent-aware-subtle: oklch(0.265 0.045 232);
+  --intent-warm: oklch(0.805 0.145 80);
+  --intent-warm-subtle: oklch(0.285 0.05 78);
+  --intent-hot: oklch(0.745 0.165 44);
+  --intent-hot-subtle: oklch(0.285 0.06 42);
+  --intent-buying: oklch(0.685 0.195 20);
+  --intent-buying-subtle: oklch(0.285 0.065 20);
+
+  --tier-a: oklch(0.685 0.105 186);
+  --tier-b: oklch(0.695 0.115 245);
+  --tier-c: oklch(0.655 0.022 255);
+  --tier-d: oklch(0.505 0.012 255);
+
+  /* Dark mode is stepped independently, not flipped. Its band is narrower
+     (L 0.48-0.67) and jade/magenta are separated by lightness because their
+     hues collapse together under deuteranopia. Validated separately. */
+  --chart-1: oklch(0.66 0.12 185);
+  --chart-2: oklch(0.62 0.15 68);
+  --chart-3: oklch(0.58 0.19 250);
+  --chart-4: oklch(0.51 0.19 340);
+
+  --seq-1: oklch(0.26 0.03 185);
+  --seq-2: oklch(0.34 0.06 185);
+  --seq-3: oklch(0.43 0.09 185);
+  --seq-4: oklch(0.52 0.12 185);
+  --seq-5: oklch(0.61 0.13 185);
+  --seq-6: oklch(0.7 0.12 185);
+
+  --chart-grid: oklch(0.285 0.01 255);
+  --chart-axis: oklch(0.565 0.012 255);
+
+  --ai-surface: oklch(0.225 0.022 200);
+  --ai-border: oklch(0.335 0.038 200);
+  --ai-accent: oklch(0.725 0.09 200);
+
+  --ring: oklch(0.685 0.105 186);
+  --overlay: oklch(0.08 0.01 255 / 0.7);
+
+  --shadow-color: 220 40% 2%;
+}
+
+/* ==========================================================================
+   TAILWIND THEME MAPPING
+   ========================================================================== */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-inverse: var(--text-inverse);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-active: var(--brand-active);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-brand-subtle-hover: var(--brand-subtle-hover);
+  --color-brand-border: var(--brand-border);
+  --color-brand-text: var(--brand-text);
+  --color-brand-fg: var(--brand-fg);
+
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-border: var(--success-border);
+  --color-success-text: var(--success-text);
+
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-border: var(--warning-border);
+  --color-warning-text: var(--warning-text);
+
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-border: var(--danger-border);
+  --color-danger-text: var(--danger-text);
+
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-border: var(--info-border);
+  --color-info-text: var(--info-text);
+
+  --color-intent-cold: var(--intent-cold);
+  --color-intent-cold-subtle: var(--intent-cold-subtle);
+  --color-intent-aware: var(--intent-aware);
+  --color-intent-aware-subtle: var(--intent-aware-subtle);
+  --color-intent-warm: var(--intent-warm);
+  --color-intent-warm-subtle: var(--intent-warm-subtle);
+  --color-intent-hot: var(--intent-hot);
+  --color-intent-hot-subtle: var(--intent-hot-subtle);
+  --color-intent-buying: var(--intent-buying);
+  --color-intent-buying-subtle: var(--intent-buying-subtle);
+
+  --color-tier-a: var(--tier-a);
+  --color-tier-b: var(--tier-b);
+  --color-tier-c: var(--tier-c);
+  --color-tier-d: var(--tier-d);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-seq-1: var(--seq-1);
+  --color-seq-2: var(--seq-2);
+  --color-seq-3: var(--seq-3);
+  --color-seq-4: var(--seq-4);
+  --color-seq-5: var(--seq-5);
+  --color-seq-6: var(--seq-6);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-axis: var(--chart-axis);
+
+  --color-ai-surface: var(--ai-surface);
+  --color-ai-border: var(--ai-border);
+  --color-ai-accent: var(--ai-accent);
+
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-face), ui-monospace, SFMono-Regular, monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+
+  /* Dense operational type scale — smaller than Tailwind's defaults. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ==========================================================================
+   BASE
+   ========================================================================== */
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    font-variation-settings: "opsz" 16;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Every number in a dense table should align. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Reduce the default focus ring only where we draw our own. */
+  [data-focus-ring="custom"]:focus-visible {
+    outline: none;
+  }
+
+  ::selection {
+    background-color: var(--brand-subtle-hover);
+    color: var(--text-primary);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  /* Hairline dividers that survive both themes. */
+  .divide-hairline > * + * {
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .shadow-card {
+    box-shadow:
+      0 1px 2px -1px hsl(var(--shadow-color) / 0.1),
+      0 1px 3px 0 hsl(var(--shadow-color) / 0.06);
+  }
+
+  .shadow-raised {
+    box-shadow:
+      0 2px 4px -2px hsl(var(--shadow-color) / 0.12),
+      0 4px 12px -2px hsl(var(--shadow-color) / 0.08);
+  }
+
+  .shadow-overlay {
+    box-shadow:
+      0 4px 8px -4px hsl(var(--shadow-color) / 0.16),
+      0 16px 32px -8px hsl(var(--shadow-color) / 0.14);
+  }
+
+  .shadow-drag {
+    box-shadow:
+      0 8px 16px -6px hsl(var(--shadow-color) / 0.24),
+      0 24px 48px -12px hsl(var(--shadow-color) / 0.18);
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Skeleton shimmer, respecting reduced-motion below. */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--surface-sunken) 25%,
+      var(--surface-hover) 37%,
+      var(--surface-sunken) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-sweep 1.4s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-sweep {
+    0% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0 50%;
+    }
+  }
+
+  .animate-in-up {
+    animation: in-up 0.2s var(--ease-out-quint) both;
+  }
+  @keyframes in-up {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+
+  .ai-gradient-border {
+    background-image: linear-gradient(135deg, var(--ai-border), transparent 60%);
+  }
+}
+
+/* §107 — honour the OS reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton {
+    animation: none;
+    background: var(--surface-sunken);
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

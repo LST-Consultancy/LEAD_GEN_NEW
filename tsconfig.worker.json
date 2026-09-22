@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "jsx": "preserve",
+    "paths": {
+      "@/*": ["./src/*"],
+      // `server-only` throws by design outside a React Server Component. Next
+      // swaps in the package's own no-op via the react-server export condition;
+      // the worker is a server context too, so it maps to the same file.
+      // Done here rather than with a Node flag so it works on any platform.
+      "server-only": ["./node_modules/server-only/empty.js"]
+    }
+  },
+  "include": ["src/worker/**/*.ts", "src/lib/**/*.ts", "src/generated/**/*.ts"]
+}
