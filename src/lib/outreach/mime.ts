@@ -33,7 +33,6 @@ const CRLF = "\r\n";
 
 /** True when every character is representable in 7-bit ASCII. */
 export function isAscii(value: string): boolean {
-  // eslint-disable-next-line no-control-regex
   return /^[\x00-\x7F]*$/.test(value);
 }
 

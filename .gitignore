@@ -50,3 +50,6 @@ next-env.d.ts
 e2e/.auth/
 test-results/
 playwright-report/
+
+# Isolated Next.js validation artifacts
+/.next-opportunity-*/

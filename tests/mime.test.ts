@@ -4,7 +4,6 @@ import {
   dotStuff,
   encodeHeaderValue,
   formatAddress,
-  isAscii,
   messageId,
   quotedPrintable,
   toCrlf,

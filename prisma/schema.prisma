@@ -276,52 +276,52 @@ enum CommitteeRole {
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String    @id @default(uuid()) @db.Uuid
-  email         String    @unique
-  emailVerified DateTime?
-  passwordHash  String?
-  name          String
-  avatarUrl     String?
-  locale        String    @default("en-IN")
-  timezone      String    @default("Asia/Kolkata")
-  mfaEnabled    Boolean   @default(false)
-  mfaSecret     String?
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  emailVerified    DateTime?
+  passwordHash     String?
+  name             String
+  avatarUrl        String?
+  locale           String    @default("en-IN")
+  timezone         String    @default("Asia/Kolkata")
+  mfaEnabled       Boolean   @default(false)
+  mfaSecret        String?
   /// Bcrypt hashes. A database read must not hand someone a way past the second factor.
   mfaRecoveryCodes String[]
   /// The last TOTP step spent, so the same code cannot be used twice.
   mfaLastUsedStep  Int?
   mfaEnrolledAt    DateTime?
-  lastLoginAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
-  memberships  WorkspaceMember[]
-  sessions     Session[]
-  ownedLeads   Lead[]            @relation("LeadOwner")
-  ownedDeals   Deal[]            @relation("DealOwner")
-  tasks        Task[]            @relation("TaskOwner")
-  notes        Note[]
-  stickyNotes  StickyNote[]
-  auditLogs    AuditLog[]
-  notifications Notification[]
-  activities   Activity[]        @relation("ActivityActor")
+  memberships     WorkspaceMember[]
+  sessions        Session[]
+  ownedLeads      Lead[]            @relation("LeadOwner")
+  ownedDeals      Deal[]            @relation("DealOwner")
+  tasks           Task[]            @relation("TaskOwner")
+  notes           Note[]
+  stickyNotes     StickyNote[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  activities      Activity[]        @relation("ActivityActor")
   taskAssignments TaskAssignment[]
 
   @@index([deletedAt])
 }
 
 model Session {
-  id           String   @id @default(uuid()) @db.Uuid
-  userId       String   @db.Uuid
-  tokenHash    String   @unique
-  workspaceId  String?  @db.Uuid
-  userAgent    String?
-  ipAddress    String?
-  expiresAt    DateTime
-  revokedAt    DateTime?
-  createdAt    DateTime @default(now())
-  lastSeenAt   DateTime @default(now())
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  tokenHash   String    @unique
+  workspaceId String?   @db.Uuid
+  userAgent   String?
+  ipAddress   String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -330,67 +330,71 @@ model Session {
 }
 
 model Workspace {
-  id             String        @id @default(uuid()) @db.Uuid
-  name           String
-  slug           String        @unique
-  logoUrl        String?
-  website        String?
-  industry       String?
-  country        String        @default("IN")
-  currency       String        @default("INR")
-  timezone       String        @default("Asia/Kolkata")
-  locale         String        @default("en-IN")
-  gstin          String?
-  autopilotMode  AutopilotMode @default(OFF)
-  onboardedAt    DateTime?
-  archiveAfterDays Int         @default(45)
-  recycleBinDays Int           @default(30)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  deletedAt      DateTime?
+  id               String        @id @default(uuid()) @db.Uuid
+  name             String
+  slug             String        @unique
+  logoUrl          String?
+  website          String?
+  industry         String?
+  country          String        @default("IN")
+  currency         String        @default("INR")
+  timezone         String        @default("Asia/Kolkata")
+  locale           String        @default("en-IN")
+  gstin            String?
+  autopilotMode    AutopilotMode @default(OFF)
+  onboardedAt      DateTime?
+  archiveAfterDays Int           @default(45)
+  recycleBinDays   Int           @default(30)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
 
-  members         WorkspaceMember[]
-  roles           Role[]
-  subscription    Subscription?
-  pointLedger     PointLedger[]
-  icpProfiles     IcpProfile[]
-  companies       Company[]
-  people          Person[]
-  leads           Lead[]
-  signals         Signal[]
-  searchPhrases   SearchPhrase[]
-  lists           List[]
-  pipelines       Pipeline[]
-  deals           Deal[]
-  tasks           Task[]
-  notes           Note[]
-  activities      Activity[]
-  conversations   Conversation[]
-  messages        Message[]
-  sequences       Sequence[]
-  proposals       Proposal[]
-  bookings        Booking[]
-  researchReports ResearchReport[]
-  insights        AIInsight[]
-  agents          AIAgent[]
-  notifications   Notification[]
-  auditLogs       AuditLog[]
-  webhooks        Webhook[]
-  apiKeys         ApiKey[]
-  files           File[]
-  stickyNotes     StickyNote[]
-  radarWatches    RadarWatch[]
-  savedSearches   SavedSearch[]
-  knowledgeDocs   KnowledgeDoc[]
-  playbooks       Playbook[]
-  competitors     Competitor[]
-  suppressions    Suppression[]
-  scoringConfig   ScoringConfig?
-  featureFlags    FeatureFlag[]
-  autopilotConfig AutopilotConfig?
-  agentRuns       AgentRun[]
-  aiRequests      AIRequestLog[]
-  deletedRecords  DeletedRecord[]
+  opportunities       Opportunity[]
+  opportunitySearches OpportunitySearch[]
+  providerConnections ProviderConnection[]
+  providerSyncs       ProviderSync[]
+  members             WorkspaceMember[]
+  roles               Role[]
+  subscription        Subscription?
+  pointLedger         PointLedger[]
+  icpProfiles         IcpProfile[]
+  companies           Company[]
+  people              Person[]
+  leads               Lead[]
+  signals             Signal[]
+  searchPhrases       SearchPhrase[]
+  lists               List[]
+  pipelines           Pipeline[]
+  deals               Deal[]
+  tasks               Task[]
+  notes               Note[]
+  activities          Activity[]
+  conversations       Conversation[]
+  messages            Message[]
+  sequences           Sequence[]
+  proposals           Proposal[]
+  bookings            Booking[]
+  researchReports     ResearchReport[]
+  insights            AIInsight[]
+  agents              AIAgent[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  webhooks            Webhook[]
+  apiKeys             ApiKey[]
+  files               File[]
+  stickyNotes         StickyNote[]
+  radarWatches        RadarWatch[]
+  savedSearches       SavedSearch[]
+  knowledgeDocs       KnowledgeDoc[]
+  playbooks           Playbook[]
+  competitors         Competitor[]
+  suppressions        Suppression[]
+  scoringConfig       ScoringConfig?
+  featureFlags        FeatureFlag[]
+  autopilotConfig     AutopilotConfig?
+  agentRuns           AgentRun[]
+  aiRequests          AIRequestLog[]
+  deletedRecords      DeletedRecord[]
 
   @@index([deletedAt])
 }
@@ -414,18 +418,18 @@ model Role {
 }
 
 model WorkspaceMember {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  userId      String    @db.Uuid
-  roleId      String    @db.Uuid
-  title       String?
-  isDefault   Boolean   @default(false)
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @db.Uuid
+  userId        String    @db.Uuid
+  roleId        String    @db.Uuid
+  title         String?
+  isDefault     Boolean   @default(false)
   dailyPointCap Int?
-  invitedAt   DateTime?
-  joinedAt    DateTime  @default(now())
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  invitedAt     DateTime?
+  joinedAt      DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -478,19 +482,19 @@ model Subscription {
 
 /// Immutable append-only ledger. Balance = SUM(delta). Never update or delete rows.
 model PointLedger {
-  id          String       @id @default(uuid()) @db.Uuid
-  workspaceId String       @db.Uuid
-  type        PointTxnType
-  delta       Int
-  balanceAfter Int
-  reason      String
-  actorType   ActorType    @default(HUMAN)
-  actorUserId String?      @db.Uuid
-  refType     String?
-  refId       String?
-  idempotencyKey String?   @unique
-  metadata    Json         @default("{}")
-  createdAt   DateTime     @default(now())
+  id             String       @id @default(uuid()) @db.Uuid
+  workspaceId    String       @db.Uuid
+  type           PointTxnType
+  delta          Int
+  balanceAfter   Int
+  reason         String
+  actorType      ActorType    @default(HUMAN)
+  actorUserId    String?      @db.Uuid
+  refType        String?
+  refId          String?
+  idempotencyKey String?      @unique
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -503,27 +507,27 @@ model PointLedger {
 // ---------------------------------------------------------------------------
 
 model IcpProfile {
-  id             String   @id @default(uuid()) @db.Uuid
-  workspaceId    String   @db.Uuid
-  name           String
-  isPrimary      Boolean  @default(false)
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @db.Uuid
+  name             String
+  isPrimary        Boolean   @default(false)
   sellsDescription String?
-  industries     String[]
-  locations      String[]
-  employeeMin    Int?
-  employeeMax    Int?
-  revenueMinInr  Decimal? @db.Decimal(14, 2)
-  revenueMaxInr  Decimal? @db.Decimal(14, 2)
-  buyerRoles     String[]
-  seniorities    String[]
-  technologies   String[]
-  pains          String[]
-  triggerEvents  String[]
-  exclusions     String[]
-  rules          Json     @default("{}")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  deletedAt      DateTime?
+  industries       String[]
+  locations        String[]
+  employeeMin      Int?
+  employeeMax      Int?
+  revenueMinInr    Decimal?  @db.Decimal(14, 2)
+  revenueMaxInr    Decimal?  @db.Decimal(14, 2)
+  buyerRoles       String[]
+  seniorities      String[]
+  technologies     String[]
+  pains            String[]
+  triggerEvents    String[]
+  exclusions       String[]
+  rules            Json      @default("{}")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   leads     Lead[]
@@ -535,6 +539,7 @@ model IcpProfile {
 model ScoringConfig {
   id                 String   @id @default(uuid()) @db.Uuid
   workspaceId        String   @unique @db.Uuid
+  opportunityRules   Json     @default("{}")
   fitWeight          Int      @default(25)
   intentWeight       Int      @default(25)
   urgencyWeight      Int      @default(15)
@@ -556,46 +561,48 @@ model ScoringConfig {
 // ---------------------------------------------------------------------------
 
 model Company {
-  id            String    @id @default(uuid()) @db.Uuid
-  workspaceId   String    @db.Uuid
-  name          String
-  legalName     String?
-  domain        String?
-  website       String?
-  linkedinUrl   String?
-  logoUrl       String?
-  description   String?
-  industry      String?
-  subIndustry   String?
-  employeeCount Int?
-  employeeBand  String?
-  revenueBandInr String?
-  foundedYear   Int?
-  city          String?
-  state         String?
-  country       String    @default("India")
-  technologies  String[]
-  tags          String[]
-  intentScore   Int       @default(0)
-  intentScoreReason Json   @default("{}")
-  lastSignalAt  DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  name              String
+  legalName         String?
+  domain            String?
+  website           String?
+  linkedinUrl       String?
+  logoUrl           String?
+  description       String?
+  industry          String?
+  subIndustry       String?
+  employeeCount     Int?
+  employeeBand      String?
+  revenueBandInr    String?
+  foundedYear       Int?
+  city              String?
+  state             String?
+  country           String    @default("India")
+  technologies      String[]
+  tags              String[]
+  intentScore       Int       @default(0)
+  intentScoreReason Json      @default("{}")
+  lastSignalAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  employments Employment[]
-  leads       Lead[]
-  signals     Signal[]
-  deals       Deal[]
-  committee   CommitteeMember[]
-  research    ResearchReport[]
-  notes       Note[]
-  tasks       Task[]
-  activities  Activity[]
-  proposals   Proposal[]
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  opportunities Opportunity[]
+  employments   Employment[]
+  leads         Lead[]
+  signals       Signal[]
+  deals         Deal[]
+  committee     CommitteeMember[]
+  research      ResearchReport[]
+  notes         Note[]
+  tasks         Task[]
+  activities    Activity[]
+  proposals     Proposal[]
   conversations Conversation[]
 
+  @@unique([workspaceId, id])
   @@unique([workspaceId, domain])
   @@index([workspaceId, deletedAt])
   @@index([workspaceId, industry])
@@ -605,23 +612,23 @@ model Company {
 }
 
 model Person {
-  id           String    @id @default(uuid()) @db.Uuid
-  workspaceId  String    @db.Uuid
-  fullName     String
-  firstName    String?
-  lastName     String?
-  headline     String?
-  linkedinUrl  String?
-  avatarUrl    String?
-  city         String?
-  state        String?
-  country      String    @default("India")
-  languages    String[]
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  fullName    String
+  firstName   String?
+  lastName    String?
+  headline    String?
+  linkedinUrl String?
+  avatarUrl   String?
+  city        String?
+  state       String?
+  country     String    @default("India")
+  languages   String[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
-  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   employments    Employment[]
   contactMethods ContactMethod[]
   leads          Lead[]
@@ -636,19 +643,19 @@ model Person {
 }
 
 model Employment {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  personId    String    @db.Uuid
-  companyId   String    @db.Uuid
-  title       String
-  department  String?
-  seniority   String?
-  isDecisionMaker Boolean @default(false)
-  isCurrent   Boolean   @default(true)
-  startedAt   DateTime?
-  endedAt     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @db.Uuid
+  personId        String    @db.Uuid
+  companyId       String    @db.Uuid
+  title           String
+  department      String?
+  seniority       String?
+  isDecisionMaker Boolean   @default(false)
+  isCurrent       Boolean   @default(true)
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   person  Person  @relation(fields: [personId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -660,24 +667,26 @@ model Employment {
 
 /// Contact details. `isLocked` = present in source but not yet paid for / revealed.
 model ContactMethod {
-  id            String             @id @default(uuid()) @db.Uuid
-  workspaceId   String             @db.Uuid
-  personId      String             @db.Uuid
-  kind          ContactKind
-  value         String?
-  maskedValue   String
-  isLocked      Boolean            @default(true)
-  isPrimary     Boolean            @default(false)
-  status        VerificationStatus @default(UNVERIFIED)
-  confidence    Int                @default(50)
-  source        String
-  verifiedAt    DateTime?
-  revealedAt    DateTime?
-  revealedByUserId String?         @db.Uuid
-  bounceCount   Int                @default(0)
-  optedOutAt    DateTime?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  verificationResult String             @default("UNKNOWN")
+  provenance         Json               @default("{}")
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @db.Uuid
+  personId           String             @db.Uuid
+  kind               ContactKind
+  value              String?
+  maskedValue        String
+  isLocked           Boolean            @default(true)
+  isPrimary          Boolean            @default(false)
+  status             VerificationStatus @default(UNVERIFIED)
+  confidence         Int                @default(50)
+  source             String
+  verifiedAt         DateTime?
+  revealedAt         DateTime?
+  revealedByUserId   String?            @db.Uuid
+  bounceCount        Int                @default(0)
+  optedOutAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
 
@@ -688,16 +697,16 @@ model ContactMethod {
 
 /// Structured, AI-readable relationship context per person (§114).
 model RelationshipMemory {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  personId    String   @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  personId    String    @db.Uuid
   kind        String
   content     String
   sourceType  String
   sourceId    String?
-  confidence  Int      @default(70)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  confidence  Int       @default(70)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
@@ -710,54 +719,54 @@ model RelationshipMemory {
 // ---------------------------------------------------------------------------
 
 model Lead {
-  id             String      @id @default(uuid()) @db.Uuid
-  workspaceId    String      @db.Uuid
-  personId       String      @db.Uuid
-  companyId      String      @db.Uuid
-  icpProfileId   String?     @db.Uuid
-  ownerId        String?     @db.Uuid
-  status         LeadStatus  @default(NEW)
-  tier           IcpTier     @default(C)
-  intent         IntentLevel @default(COLD)
-  isStarred      Boolean     @default(false)
-  isRevealed     Boolean     @default(false)
-  estimatedBudgetInr Decimal? @db.Decimal(14, 2)
-  surfacedAt     DateTime    @default(now())
-  surfacedReason String
-  sourcePhraseId String?     @db.Uuid
-  lastContactedAt DateTime?
-  lastActivityAt DateTime?
-  repliedAt      DateTime?
-  nextActionAt   DateTime?
-  nextActionLabel String?
-  archivedAt     DateTime?
-  discardedAt    DateTime?
-  discardReason  String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  deletedAt      DateTime?
+  id                 String      @id @default(uuid()) @db.Uuid
+  workspaceId        String      @db.Uuid
+  personId           String      @db.Uuid
+  companyId          String      @db.Uuid
+  icpProfileId       String?     @db.Uuid
+  ownerId            String?     @db.Uuid
+  status             LeadStatus  @default(NEW)
+  tier               IcpTier     @default(C)
+  intent             IntentLevel @default(COLD)
+  isStarred          Boolean     @default(false)
+  isRevealed         Boolean     @default(false)
+  estimatedBudgetInr Decimal?    @db.Decimal(14, 2)
+  surfacedAt         DateTime    @default(now())
+  surfacedReason     String
+  sourcePhraseId     String?     @db.Uuid
+  lastContactedAt    DateTime?
+  lastActivityAt     DateTime?
+  repliedAt          DateTime?
+  nextActionAt       DateTime?
+  nextActionLabel    String?
+  archivedAt         DateTime?
+  discardedAt        DateTime?
+  discardReason      String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  deletedAt          DateTime?
 
-  workspace  Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  person     Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
-  company    Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  icpProfile IcpProfile?   @relation(fields: [icpProfileId], references: [id])
-  owner      User?         @relation("LeadOwner", fields: [ownerId], references: [id])
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  person       Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  icpProfile   IcpProfile?   @relation(fields: [icpProfileId], references: [id])
+  owner        User?         @relation("LeadOwner", fields: [ownerId], references: [id])
   sourcePhrase SearchPhrase? @relation(fields: [sourcePhraseId], references: [id])
 
-  score         LeadScore?
-  signals       Signal[]
-  deals         Deal[]
-  tasks         Task[]
-  notes         Note[]
-  activities    Activity[]
-  conversations Conversation[]
-  listMembers   ListMember[]
-  research      ResearchReport[]
-  proposals     Proposal[]
-  enrollments   SequenceEnrollment[]
-  insights      AIInsight[]
-  bookings      Booking[]
-  readiness     ReadinessItem[]
+  score           LeadScore?
+  signals         Signal[]
+  deals           Deal[]
+  tasks           Task[]
+  notes           Note[]
+  activities      Activity[]
+  conversations   Conversation[]
+  listMembers     ListMember[]
+  research        ResearchReport[]
+  proposals       Proposal[]
+  enrollments     SequenceEnrollment[]
+  insights        AIInsight[]
+  bookings        Booking[]
+  readiness       ReadinessItem[]
   nextBestActions NextBestAction[]
 
   @@unique([workspaceId, personId, companyId])
@@ -785,7 +794,7 @@ model LeadScore {
   engagementScore   Int      @default(0)
   recencyScore      Int      @default(0)
   composite         Int      @default(0)
-  displayScore      Decimal  @db.Decimal(3, 1) @default(0)
+  displayScore      Decimal  @default(0) @db.Decimal(3, 1)
   overriddenScore   Decimal? @db.Decimal(3, 1)
   overriddenById    String?  @db.Uuid
   overrideReason    String?
@@ -818,28 +827,28 @@ model LeadScoreEvidence {
 }
 
 model Signal {
-  id            String           @id @default(uuid()) @db.Uuid
-  workspaceId   String           @db.Uuid
-  leadId        String?          @db.Uuid
-  personId      String?          @db.Uuid
-  companyId     String?          @db.Uuid
-  type          SignalType
-  sourceKind    SignalSourceKind
-  sourceName    String
-  sourceUrl     String?
-  title         String
-  excerpt       String
+  id               String           @id @default(uuid()) @db.Uuid
+  workspaceId      String           @db.Uuid
+  leadId           String?          @db.Uuid
+  personId         String?          @db.Uuid
+  companyId        String?          @db.Uuid
+  type             SignalType
+  sourceKind       SignalSourceKind
+  sourceName       String
+  sourceUrl        String?
+  title            String
+  excerpt          String
   aiInterpretation String?
-  confidence    Int              @default(60)
-  intentDelta   Int              @default(0)
-  suggestedAction String?
-  keywords      String[]
-  occurredAt    DateTime
-  detectedAt    DateTime         @default(now())
-  searchPhraseId String?         @db.Uuid
-  dedupeHash    String
-  createdAt     DateTime         @default(now())
-  deletedAt     DateTime?
+  confidence       Int              @default(60)
+  intentDelta      Int              @default(0)
+  suggestedAction  String?
+  keywords         String[]
+  occurredAt       DateTime
+  detectedAt       DateTime         @default(now())
+  searchPhraseId   String?          @db.Uuid
+  dedupeHash       String
+  createdAt        DateTime         @default(now())
+  deletedAt        DateTime?
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lead         Lead?         @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -859,19 +868,19 @@ model Signal {
 // ---------------------------------------------------------------------------
 
 model SearchPhrase {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  phrase      String
-  sourceKind  SignalSourceKind
-  isActive    Boolean   @default(true)
-  cadenceHours Int      @default(24)
+  id               String           @id @default(uuid()) @db.Uuid
+  workspaceId      String           @db.Uuid
+  phrase           String
+  sourceKind       SignalSourceKind
+  isActive         Boolean          @default(true)
+  cadenceHours     Int              @default(24)
   negativeKeywords String[]
-  createdByAi Boolean   @default(false)
-  lastRunAt   DateTime?
-  nextRunAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  createdByAi      Boolean          @default(false)
+  lastRunAt        DateTime?
+  nextRunAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  deletedAt        DateTime?
 
   workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      SearchRun[]
@@ -883,17 +892,17 @@ model SearchPhrase {
 }
 
 model SearchRun {
-  id             String   @id @default(uuid()) @db.Uuid
-  workspaceId    String   @db.Uuid
-  searchPhraseId String   @db.Uuid
-  state          RunState @default(PENDING)
-  signalsFound   Int      @default(0)
-  leadsCreated   Int      @default(0)
-  duplicates     Int      @default(0)
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @db.Uuid
+  searchPhraseId String    @db.Uuid
+  state          RunState  @default(PENDING)
+  signalsFound   Int       @default(0)
+  leadsCreated   Int       @default(0)
+  duplicates     Int       @default(0)
   errorMessage   String?
-  startedAt      DateTime @default(now())
+  startedAt      DateTime  @default(now())
   finishedAt     DateTime?
-  idempotencyKey String?  @unique
+  idempotencyKey String?   @unique
 
   searchPhrase SearchPhrase @relation(fields: [searchPhraseId], references: [id], onDelete: Cascade)
 
@@ -925,12 +934,12 @@ model List {
 }
 
 model ListMember {
-  id        String   @id @default(uuid()) @db.Uuid
-  workspaceId String @db.Uuid
-  listId    String   @db.Uuid
-  leadId    String   @db.Uuid
-  addedAt   DateTime @default(now())
-  addedById String?  @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  listId      String   @db.Uuid
+  leadId      String   @db.Uuid
+  addedAt     DateTime @default(now())
+  addedById   String?  @db.Uuid
 
   list List @relation(fields: [listId], references: [id], onDelete: Cascade)
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -963,18 +972,18 @@ model RadarWatch {
 }
 
 model SavedSearch {
-  id          String         @id @default(uuid()) @db.Uuid
-  workspaceId String         @db.Uuid
-  name        String
-  surface     String
-  filterJson  Json           @default("{}")
-  alertEnabled Boolean       @default(false)
-  frequency   AlertFrequency @default(DAILY)
-  createdById String?        @db.Uuid
-  lastAlertAt DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  deletedAt   DateTime?
+  id           String         @id @default(uuid()) @db.Uuid
+  workspaceId  String         @db.Uuid
+  name         String
+  surface      String
+  filterJson   Json           @default("{}")
+  alertEnabled Boolean        @default(false)
+  frequency    AlertFrequency @default(DAILY)
+  createdById  String?        @db.Uuid
+  lastAlertAt  DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  deletedAt    DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -1002,19 +1011,19 @@ model Pipeline {
 }
 
 model PipelineStage {
-  id           String   @id @default(uuid()) @db.Uuid
-  workspaceId  String   @db.Uuid
-  pipelineId   String   @db.Uuid
-  key          String
-  name         String
-  sortOrder    Int
-  probability  Int      @default(0)
-  isWon        Boolean  @default(false)
-  isLost       Boolean  @default(false)
-  stallAfterDays Int    @default(10)
-  color        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  pipelineId     String   @db.Uuid
+  key            String
+  name           String
+  sortOrder      Int
+  probability    Int      @default(0)
+  isWon          Boolean  @default(false)
+  isLost         Boolean  @default(false)
+  stallAfterDays Int      @default(10)
+  color          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   pipeline Pipeline           @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
   deals    Deal[]
@@ -1025,32 +1034,32 @@ model PipelineStage {
 }
 
 model Deal {
-  id           String     @id @default(uuid()) @db.Uuid
-  workspaceId  String     @db.Uuid
-  pipelineId   String     @db.Uuid
-  stageId      String     @db.Uuid
-  leadId       String?    @db.Uuid
-  companyId    String     @db.Uuid
-  ownerId      String?    @db.Uuid
-  title        String
-  valueInr     Decimal    @db.Decimal(14, 2) @default(0)
-  currency     String     @default("INR")
-  status       DealStatus @default(OPEN)
-  repForecast  String?
-  confidence   Int        @default(50)
-  sortOrder    Int        @default(0)
+  id              String     @id @default(uuid()) @db.Uuid
+  workspaceId     String     @db.Uuid
+  pipelineId      String     @db.Uuid
+  stageId         String     @db.Uuid
+  leadId          String?    @db.Uuid
+  companyId       String     @db.Uuid
+  ownerId         String?    @db.Uuid
+  title           String
+  valueInr        Decimal    @default(0) @db.Decimal(14, 2)
+  currency        String     @default("INR")
+  status          DealStatus @default(OPEN)
+  repForecast     String?
+  confidence      Int        @default(50)
+  sortOrder       Int        @default(0)
   expectedCloseAt DateTime?
-  stageEnteredAt  DateTime @default(now())
+  stageEnteredAt  DateTime   @default(now())
   lastActivityAt  DateTime?
   nextActionAt    DateTime?
   nextActionLabel String?
-  wonAt        DateTime?
-  lostAt       DateTime?
-  lostReason   String?
-  source       String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  deletedAt    DateTime?
+  wonAt           DateTime?
+  lostAt          DateTime?
+  lostReason      String?
+  source          String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
 
   workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   pipeline  Pipeline      @relation(fields: [pipelineId], references: [id])
@@ -1059,15 +1068,15 @@ model Deal {
   company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   owner     User?         @relation("DealOwner", fields: [ownerId], references: [id])
 
-  history       DealStageHistory[]
-  tasks         Task[]
-  notes         Note[]
-  activities    Activity[]
-  proposals     Proposal[]
-  conversations Conversation[]
-  risks         DealRisk[]
-  money         MoneyEntry[]
-  bookings      Booking[]
+  history         DealStageHistory[]
+  tasks           Task[]
+  notes           Note[]
+  activities      Activity[]
+  proposals       Proposal[]
+  conversations   Conversation[]
+  risks           DealRisk[]
+  money           MoneyEntry[]
+  bookings        Booking[]
   nextBestActions NextBestAction[]
 
   @@index([workspaceId, deletedAt, status])
@@ -1078,17 +1087,17 @@ model Deal {
 }
 
 model DealStageHistory {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  dealId      String   @db.Uuid
-  fromStageId String?  @db.Uuid
-  toStageId   String   @db.Uuid
-  valueAtMove Decimal  @db.Decimal(14, 2)
-  daysInStage Int      @default(0)
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  dealId      String    @db.Uuid
+  fromStageId String?   @db.Uuid
+  toStageId   String    @db.Uuid
+  valueAtMove Decimal   @db.Decimal(14, 2)
+  daysInStage Int       @default(0)
   actorType   ActorType @default(HUMAN)
-  actorUserId String?  @db.Uuid
+  actorUserId String?   @db.Uuid
   note        String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   deal    Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
   toStage PipelineStage @relation(fields: [toStageId], references: [id])
@@ -1098,17 +1107,17 @@ model DealStageHistory {
 }
 
 model DealRisk {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  dealId      String   @db.Uuid
-  code        String
-  severity    String
-  title       String
-  explanation String
-  evidence    Json     @default("{}")
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @db.Uuid
+  dealId          String    @db.Uuid
+  code            String
+  severity        String
+  title           String
+  explanation     String
+  evidence        Json      @default("{}")
   suggestedAction String?
-  resolvedAt  DateTime?
-  detectedAt  DateTime @default(now())
+  resolvedAt      DateTime?
+  detectedAt      DateTime  @default(now())
 
   deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
@@ -1118,17 +1127,17 @@ model DealRisk {
 
 /// Delivery/collection tracking, deliberately separate from pipeline value (§37).
 model MoneyEntry {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  dealId      String   @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  dealId      String    @db.Uuid
   kind        String
-  amountInr   Decimal  @db.Decimal(14, 2)
+  amountInr   Decimal   @db.Decimal(14, 2)
   reference   String?
   dueAt       DateTime?
   settledAt   DateTime?
   note        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
@@ -1141,34 +1150,34 @@ model MoneyEntry {
 // ---------------------------------------------------------------------------
 
 model Task {
-  id           String       @id @default(uuid()) @db.Uuid
-  workspaceId  String       @db.Uuid
-  title        String
-  description  String?
-  status       TaskStatus   @default(QUEUED)
-  priority     TaskPriority @default(MEDIUM)
-  ownerId      String?      @db.Uuid
-  leadId       String?      @db.Uuid
-  companyId    String?      @db.Uuid
-  dealId       String?      @db.Uuid
-  proposalId   String?      @db.Uuid
-  bookingId    String?      @db.Uuid
-  channel      Channel?
-  dueAt        DateTime?
-  completedAt  DateTime?
-  snoozedUntil DateTime?
+  id                String       @id @default(uuid()) @db.Uuid
+  workspaceId       String       @db.Uuid
+  title             String
+  description       String?
+  status            TaskStatus   @default(QUEUED)
+  priority          TaskPriority @default(MEDIUM)
+  ownerId           String?      @db.Uuid
+  leadId            String?      @db.Uuid
+  companyId         String?      @db.Uuid
+  dealId            String?      @db.Uuid
+  proposalId        String?      @db.Uuid
+  bookingId         String?      @db.Uuid
+  channel           Channel?
+  dueAt             DateTime?
+  completedAt       DateTime?
+  snoozedUntil      DateTime?
   /// AI worklist ranking (§9) — never sorted by due date alone.
-  priorityScore Int         @default(0)
-  priorityReason String?
-  expectedImpactInr Decimal? @db.Decimal(14, 2)
+  priorityScore     Int          @default(0)
+  priorityReason    String?
+  expectedImpactInr Decimal?     @db.Decimal(14, 2)
   recommendedAction String?
-  createdByAi  Boolean      @default(false)
-  lane         String       @default("QUEUED")
-  sortOrder    Int          @default(0)
-  revenueImpact String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  deletedAt    DateTime?
+  createdByAi       Boolean      @default(false)
+  lane              String       @default("QUEUED")
+  sortOrder         Int          @default(0)
+  revenueImpact     String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   owner     User?     @relation("TaskOwner", fields: [ownerId], references: [id])
@@ -1264,21 +1273,21 @@ model StickyNote {
 
 /// Unified, filterable stream. actorType distinguishes human vs AI (§118).
 model Activity {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  kind        String
-  summary     String
-  detail      String?
-  actorType   ActorType @default(HUMAN)
-  actorUserId String?   @db.Uuid
-  actorAgentId String?  @db.Uuid
-  leadId      String?   @db.Uuid
-  companyId   String?   @db.Uuid
-  dealId      String?   @db.Uuid
-  channel     Channel?
-  amountInr   Decimal?  @db.Decimal(14, 2)
-  metadata    Json      @default("{}")
-  occurredAt  DateTime  @default(now())
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @db.Uuid
+  kind         String
+  summary      String
+  detail       String?
+  actorType    ActorType @default(HUMAN)
+  actorUserId  String?   @db.Uuid
+  actorAgentId String?   @db.Uuid
+  leadId       String?   @db.Uuid
+  companyId    String?   @db.Uuid
+  dealId       String?   @db.Uuid
+  channel      Channel?
+  amountInr    Decimal?  @db.Decimal(14, 2)
+  metadata     Json      @default("{}")
+  occurredAt   DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   actorUser User?     @relation("ActivityActor", fields: [actorUserId], references: [id])
@@ -1297,24 +1306,24 @@ model Activity {
 // ---------------------------------------------------------------------------
 
 model Conversation {
-  id          String            @id @default(uuid()) @db.Uuid
-  workspaceId String            @db.Uuid
-  channel     Channel
-  subject     String?
-  state       ConversationState @default(OPEN)
-  leadId      String?           @db.Uuid
-  companyId   String?           @db.Uuid
-  dealId      String?           @db.Uuid
-  assigneeId  String?           @db.Uuid
-  isUnread    Boolean           @default(false)
-  aiSummary   String?
-  sentiment   String?
-  lastMessageAt DateTime        @default(now())
-  snoozedUntil DateTime?
+  id               String            @id @default(uuid()) @db.Uuid
+  workspaceId      String            @db.Uuid
+  channel          Channel
+  subject          String?
+  state            ConversationState @default(OPEN)
+  leadId           String?           @db.Uuid
+  companyId        String?           @db.Uuid
+  dealId           String?           @db.Uuid
+  assigneeId       String?           @db.Uuid
+  isUnread         Boolean           @default(false)
+  aiSummary        String?
+  sentiment        String?
+  lastMessageAt    DateTime          @default(now())
+  snoozedUntil     DateTime?
   externalThreadId String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  deletedAt   DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -1365,22 +1374,22 @@ model Message {
 }
 
 model Sequence {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  name        String
-  description String?
-  isActive    Boolean   @default(false)
-  stopOnReply Boolean   @default(true)
-  stopOnUnsubscribe Boolean @default(true)
-  sendWindowStart Int   @default(9)
-  sendWindowEnd   Int   @default(19)
-  sendDays    Int[]     @default([1, 2, 3, 4, 5])
-  timezone    String    @default("Asia/Kolkata")
-  dailyCap    Int       @default(50)
-  createdById String?   @db.Uuid
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  name              String
+  description       String?
+  isActive          Boolean   @default(false)
+  stopOnReply       Boolean   @default(true)
+  stopOnUnsubscribe Boolean   @default(true)
+  sendWindowStart   Int       @default(9)
+  sendWindowEnd     Int       @default(19)
+  sendDays          Int[]     @default([1, 2, 3, 4, 5])
+  timezone          String    @default("Asia/Kolkata")
+  dailyCap          Int       @default(50)
+  createdById       String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   steps       SequenceStep[]
@@ -1390,17 +1399,17 @@ model Sequence {
 }
 
 model SequenceStep {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  sequenceId  String   @db.Uuid
-  stepOrder   Int
-  dayOffset   Int
-  channel     Channel
-  isManualTask Boolean @default(false)
-  subject     String?
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  sequenceId   String   @db.Uuid
+  stepOrder    Int
+  dayOffset    Int
+  channel      Channel
+  isManualTask Boolean  @default(false)
+  subject      String?
   bodyTemplate String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   sequence Sequence  @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
   messages Message[]
@@ -1453,33 +1462,33 @@ model Suppression {
 // ---------------------------------------------------------------------------
 
 model Proposal {
-  id          String        @id @default(uuid()) @db.Uuid
-  workspaceId String        @db.Uuid
-  leadId      String?       @db.Uuid
-  companyId   String        @db.Uuid
-  dealId      String?       @db.Uuid
-  title       String
-  state       ProposalState @default(DRAFT)
-  publicToken String        @unique
-  currency    String        @default("INR")
-  subtotalInr Decimal       @db.Decimal(14, 2) @default(0)
-  taxRate     Decimal       @db.Decimal(5, 2)  @default(18)
-  taxInr      Decimal       @db.Decimal(14, 2) @default(0)
-  totalInr    Decimal       @db.Decimal(14, 2) @default(0)
-  sections    Json          @default("[]")
-  terms       String?
-  validUntil  DateTime?
-  sentAt      DateTime?
+  id            String        @id @default(uuid()) @db.Uuid
+  workspaceId   String        @db.Uuid
+  leadId        String?       @db.Uuid
+  companyId     String        @db.Uuid
+  dealId        String?       @db.Uuid
+  title         String
+  state         ProposalState @default(DRAFT)
+  publicToken   String        @unique
+  currency      String        @default("INR")
+  subtotalInr   Decimal       @default(0) @db.Decimal(14, 2)
+  taxRate       Decimal       @default(18) @db.Decimal(5, 2)
+  taxInr        Decimal       @default(0) @db.Decimal(14, 2)
+  totalInr      Decimal       @default(0) @db.Decimal(14, 2)
+  sections      Json          @default("[]")
+  terms         String?
+  validUntil    DateTime?
+  sentAt        DateTime?
   firstViewedAt DateTime?
-  lastViewedAt DateTime?
-  viewCount   Int           @default(0)
-  acceptedAt  DateTime?
-  declinedAt  DateTime?
-  createdById String?       @db.Uuid
-  generatedByAi Boolean     @default(false)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  deletedAt   DateTime?
+  lastViewedAt  DateTime?
+  viewCount     Int           @default(0)
+  acceptedAt    DateTime?
+  declinedAt    DateTime?
+  createdById   String?       @db.Uuid
+  generatedByAi Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
 
   workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lead      Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
@@ -1494,16 +1503,16 @@ model Proposal {
 }
 
 model ProposalItem {
-  id          String  @id @default(uuid()) @db.Uuid
-  workspaceId String  @db.Uuid
-  proposalId  String  @db.Uuid
-  name        String
-  description String?
-  quantity    Decimal @db.Decimal(10, 2) @default(1)
-  unit        String  @default("item")
+  id           String  @id @default(uuid()) @db.Uuid
+  workspaceId  String  @db.Uuid
+  proposalId   String  @db.Uuid
+  name         String
+  description  String?
+  quantity     Decimal @default(1) @db.Decimal(10, 2)
+  unit         String  @default("item")
   unitPriceInr Decimal @db.Decimal(14, 2)
-  amountInr   Decimal @db.Decimal(14, 2)
-  sortOrder   Int     @default(0)
+  amountInr    Decimal @db.Decimal(14, 2)
+  sortOrder    Int     @default(0)
 
   proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
 
@@ -1564,18 +1573,18 @@ model Booking {
 // ---------------------------------------------------------------------------
 
 model CommitteeMember {
-  id          String        @id @default(uuid()) @db.Uuid
-  workspaceId String        @db.Uuid
-  companyId   String        @db.Uuid
-  personId    String        @db.Uuid
-  role        CommitteeRole @default(UNKNOWN)
-  isAiSuggested Boolean     @default(true)
-  confirmedAt DateTime?
-  influence   Int           @default(50)
-  sentiment   String?
-  note        String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id            String        @id @default(uuid()) @db.Uuid
+  workspaceId   String        @db.Uuid
+  companyId     String        @db.Uuid
+  personId      String        @db.Uuid
+  role          CommitteeRole @default(UNKNOWN)
+  isAiSuggested Boolean       @default(true)
+  confirmedAt   DateTime?
+  influence     Int           @default(50)
+  sentiment     String?
+  note          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   person  Person  @relation(fields: [personId], references: [id], onDelete: Cascade)
@@ -1606,26 +1615,26 @@ model Competitor {
 // ---------------------------------------------------------------------------
 
 model ResearchReport {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  leadId      String?  @db.Uuid
-  personId    String?  @db.Uuid
-  companyId   String?  @db.Uuid
-  depth       String   @default("deep")
-  state       RunState @default(PENDING)
-  pointsSpent Int      @default(0)
-  personSection      Json @default("{}")
-  companySection     Json @default("{}")
-  opportunitySection Json @default("{}")
-  outreachSection    Json @default("{}")
-  citations   Json     @default("[]")
-  confidence  Int      @default(0)
-  modelUsed   String?
-  requestedById String? @db.Uuid
-  requestedByAgentId String? @db.Uuid
-  startedAt   DateTime @default(now())
-  finishedAt  DateTime?
-  errorMessage String?
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @db.Uuid
+  leadId             String?   @db.Uuid
+  personId           String?   @db.Uuid
+  companyId          String?   @db.Uuid
+  depth              String    @default("deep")
+  state              RunState  @default(PENDING)
+  pointsSpent        Int       @default(0)
+  personSection      Json      @default("{}")
+  companySection     Json      @default("{}")
+  opportunitySection Json      @default("{}")
+  outreachSection    Json      @default("{}")
+  citations          Json      @default("[]")
+  confidence         Int       @default(0)
+  modelUsed          String?
+  requestedById      String?   @db.Uuid
+  requestedByAgentId String?   @db.Uuid
+  startedAt          DateTime  @default(now())
+  finishedAt         DateTime?
+  errorMessage       String?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -1665,21 +1674,21 @@ model AIInsight {
 }
 
 model NextBestAction {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  leadId      String?  @db.Uuid
-  dealId      String?  @db.Uuid
-  action      String
-  label       String
-  rationale   String
-  rank        Int      @default(0)
-  score       Int      @default(0)
-  channel     Channel?
-  expectedImpactInr Decimal? @db.Decimal(14, 2)
-  chosenAt    DateTime?
-  rejectedAt  DateTime?
-  feedback    String?
-  computedAt  DateTime @default(now())
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  leadId            String?   @db.Uuid
+  dealId            String?   @db.Uuid
+  action            String
+  label             String
+  rationale         String
+  rank              Int       @default(0)
+  score             Int       @default(0)
+  channel           Channel?
+  expectedImpactInr Decimal?  @db.Decimal(14, 2)
+  chosenAt          DateTime?
+  rejectedAt        DateTime?
+  feedback          String?
+  computedAt        DateTime  @default(now())
 
   lead Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
   deal Deal? @relation(fields: [dealId], references: [id], onDelete: Cascade)
@@ -1706,20 +1715,20 @@ model ReadinessItem {
 }
 
 model AIAgent {
-  id          String        @id @default(uuid()) @db.Uuid
-  workspaceId String        @db.Uuid
-  kind        AgentKind
-  name        String
-  goal        String
-  isEnabled   Boolean       @default(false)
-  tools       String[]
-  approvalPolicy String     @default("review_first")
-  dailyPointBudget Int      @default(0)
-  dailyActionCap Int        @default(0)
-  config      Json          @default("{}")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  deletedAt   DateTime?
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @db.Uuid
+  kind             AgentKind
+  name             String
+  goal             String
+  isEnabled        Boolean   @default(false)
+  tools            String[]
+  approvalPolicy   String    @default("review_first")
+  dailyPointBudget Int       @default(0)
+  dailyActionCap   Int       @default(0)
+  config           Json      @default("{}")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      AgentRun[]
@@ -1729,46 +1738,46 @@ model AIAgent {
 }
 
 model AutopilotConfig {
-  id                String        @id @default(uuid()) @db.Uuid
-  workspaceId       String        @unique @db.Uuid
-  mode              AutopilotMode @default(OFF)
-  maxLeadsPerDay    Int           @default(20)
-  maxRevealsPerDay  Int           @default(5)
-  maxPointsPerDay   Int           @default(25)
-  maxEmailsPerDay   Int           @default(30)
-  maxWhatsappPerDay Int           @default(10)
-  maxLinkedinPerDay Int           @default(10)
-  allowedTiers      IcpTier[]     @default([A, B])
-  minScore          Int           @default(70)
-  allowedIndustries String[]
-  allowedLocations  String[]
-  allowedChannels   Channel[]     @default([EMAIL])
-  sendWindowStart   Int           @default(9)
-  sendWindowEnd     Int           @default(19)
-  sendDays          Int[]         @default([1, 2, 3, 4, 5])
-  blockedDomains    String[]
-  blockedCompanies  String[]
-  approvalThresholdInr Decimal    @db.Decimal(14, 2) @default(0)
-  requireApprovalForSpend Boolean @default(true)
-  updatedAt         DateTime      @updatedAt
+  id                      String        @id @default(uuid()) @db.Uuid
+  workspaceId             String        @unique @db.Uuid
+  mode                    AutopilotMode @default(OFF)
+  maxLeadsPerDay          Int           @default(20)
+  maxRevealsPerDay        Int           @default(5)
+  maxPointsPerDay         Int           @default(25)
+  maxEmailsPerDay         Int           @default(30)
+  maxWhatsappPerDay       Int           @default(10)
+  maxLinkedinPerDay       Int           @default(10)
+  allowedTiers            IcpTier[]     @default([A, B])
+  minScore                Int           @default(70)
+  allowedIndustries       String[]
+  allowedLocations        String[]
+  allowedChannels         Channel[]     @default([EMAIL])
+  sendWindowStart         Int           @default(9)
+  sendWindowEnd           Int           @default(19)
+  sendDays                Int[]         @default([1, 2, 3, 4, 5])
+  blockedDomains          String[]
+  blockedCompanies        String[]
+  approvalThresholdInr    Decimal       @default(0) @db.Decimal(14, 2)
+  requireApprovalForSpend Boolean       @default(true)
+  updatedAt               DateTime      @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model AgentRun {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  agentId     String   @db.Uuid
-  trigger     String
-  state       RunState @default(PENDING)
-  summary     String?
-  pointsSpent Int      @default(0)
-  actionsTaken Int     @default(0)
-  actionsHeld Int      @default(0)
-  startedAt   DateTime @default(now())
-  finishedAt  DateTime?
-  errorMessage String?
-  idempotencyKey String? @unique
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @db.Uuid
+  agentId        String    @db.Uuid
+  trigger        String
+  state          RunState  @default(PENDING)
+  summary        String?
+  pointsSpent    Int       @default(0)
+  actionsTaken   Int       @default(0)
+  actionsHeld    Int       @default(0)
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  errorMessage   String?
+  idempotencyKey String?   @unique
 
   workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   agent     AIAgent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
@@ -1779,25 +1788,25 @@ model AgentRun {
 }
 
 model AgentAction {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  runId       String   @db.Uuid
-  sequence    Int
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @db.Uuid
+  runId            String    @db.Uuid
+  sequence         Int
   /// READ | WRITE | SPEND | EXTERNAL — risk class from §63
-  riskClass   String
-  tool        String
-  summary     String
-  input       Json     @default("{}")
-  output      Json     @default("{}")
-  state       String   @default("completed")
-  pointsSpent Int      @default(0)
-  requiresApproval Boolean @default(false)
-  approvedById String? @db.Uuid
-  approvedAt  DateTime?
-  rejectedAt  DateTime?
-  leadId      String?  @db.Uuid
-  dealId      String?  @db.Uuid
-  occurredAt  DateTime @default(now())
+  riskClass        String
+  tool             String
+  summary          String
+  input            Json      @default("{}")
+  output           Json      @default("{}")
+  state            String    @default("completed")
+  pointsSpent      Int       @default(0)
+  requiresApproval Boolean   @default(false)
+  approvedById     String?   @db.Uuid
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  leadId           String?   @db.Uuid
+  dealId           String?   @db.Uuid
+  occurredAt       DateTime  @default(now())
 
   run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
@@ -1807,18 +1816,18 @@ model AgentAction {
 }
 
 model Playbook {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  name        String
-  description String?
-  triggerJson Json      @default("{}")
-  steps       Json      @default("[]")
-  isActive    Boolean   @default(false)
-  isAgentTriggerable Boolean @default(false)
-  timesRun    Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @db.Uuid
+  name               String
+  description        String?
+  triggerJson        Json      @default("{}")
+  steps              Json      @default("[]")
+  isActive           Boolean   @default(false)
+  isAgentTriggerable Boolean   @default(false)
+  timesRun           Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -1846,21 +1855,21 @@ model KnowledgeDoc {
 
 /// Per-request AI observability and cost tracking (§88).
 model AIRequestLog {
-  id           String   @id @default(uuid()) @db.Uuid
-  workspaceId  String   @db.Uuid
-  feature      String
-  provider     String
-  model        String
-  promptKey    String?
-  latencyMs    Int
-  inputTokens  Int      @default(0)
-  outputTokens Int      @default(0)
-  estimatedCostInr Decimal @db.Decimal(12, 4) @default(0)
-  success      Boolean  @default(true)
-  errorCode    String?
-  actorType    ActorType @default(HUMAN)
-  actorUserId  String?  @db.Uuid
-  createdAt    DateTime @default(now())
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @db.Uuid
+  feature          String
+  provider         String
+  model            String
+  promptKey        String?
+  latencyMs        Int
+  inputTokens      Int       @default(0)
+  outputTokens     Int       @default(0)
+  estimatedCostInr Decimal   @default(0) @db.Decimal(12, 4)
+  success          Boolean   @default(true)
+  errorCode        String?
+  actorType        ActorType @default(HUMAN)
+  actorUserId      String?   @db.Uuid
+  createdAt        DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -1919,16 +1928,16 @@ model AuditLog {
 
 /// Recycle bin index for soft-deleted rows (§82).
 model DeletedRecord {
-  id            String   @id @default(uuid()) @db.Uuid
-  workspaceId   String   @db.Uuid
-  objectType    String
-  objectId      String
-  label         String
-  deletedByUserId String? @db.Uuid
-  deletedByLabel String
-  purgeAfter    DateTime
-  restoredAt    DateTime?
-  createdAt     DateTime @default(now())
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @db.Uuid
+  objectType      String
+  objectId        String
+  label           String
+  deletedByUserId String?   @db.Uuid
+  deletedByLabel  String
+  purgeAfter      DateTime
+  restoredAt      DateTime?
+  createdAt       DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -1937,38 +1946,38 @@ model DeletedRecord {
 }
 
 model Webhook {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  name        String
-  url         String
-  events      String[]
-  secret      String
-  isActive    Boolean   @default(true)
-  lastStatus  Int?
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @db.Uuid
+  name           String
+  url            String
+  events         String[]
+  secret         String
+  isActive       Boolean   @default(true)
+  lastStatus     Int?
   lastDeliveryAt DateTime?
-  failureCount Int      @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  failureCount   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
-  workspace  Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   deliveries WebhookDelivery[]
 
   @@index([workspaceId, isActive])
 }
 
 model WebhookDelivery {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  webhookId   String   @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  webhookId   String    @db.Uuid
   event       String
   payload     Json
   statusCode  Int?
-  attempt     Int      @default(1)
+  attempt     Int       @default(1)
   error       String?
   deliveredAt DateTime?
   nextRetryAt DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
 
@@ -1995,15 +2004,15 @@ model ApiKey {
 }
 
 model File {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @db.Uuid
-  name        String
-  mimeType    String
-  sizeBytes   Int
-  storageKey  String
-  uploadedById String? @db.Uuid
-  createdAt   DateTime @default(now())
-  deletedAt   DateTime?
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @db.Uuid
+  name         String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String
+  uploadedById String?   @db.Uuid
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -2021,4 +2030,242 @@ model FeatureFlag {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, key])
+}
+
+// Evidence-led discovery. Composite foreign keys prevent cross-tenant links.
+enum OpportunityType {
+  INTERNAL_HIRING
+  EXTERNAL_VENDOR
+  IMPLEMENTATION
+  INTEGRATION
+  CONSULTING
+  OUTSOURCING
+  STAFF_AUGMENTATION
+  PROJECT
+  RFP
+  MIGRATION
+  DIGITAL_TRANSFORMATION
+  UNKNOWN
+}
+
+enum OpportunityStatus {
+  NEW
+  ACTIVE
+  AGING
+  CLOSED
+  EXPIRED
+  PAUSED
+  OPEN
+  AWARDED
+  CANCELLED
+  UNKNOWN
+}
+
+enum DiscoveryState {
+  QUEUED
+  RUNNING
+  PARTIAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Opportunity {
+  id               String                    @id @default(uuid()) @db.Uuid
+  workspaceId      String                    @db.Uuid
+  companyId        String                    @db.Uuid
+  title            String
+  service          String
+  types            OpportunityType[]
+  status           OpportunityStatus         @default(UNKNOWN)
+  technologies     String[]
+  requirements     String[]
+  location         String?
+  postedAt         DateTime?
+  closingAt        DateTime?
+  discoveredAt     DateTime                  @default(now())
+  lastSeenAt       DateTime                  @default(now())
+  lastCheckedAt    DateTime                  @default(now())
+  lastChangedAt    DateTime?
+  updatedAt        DateTime                  @updatedAt
+  activeRank       Int                       @default(0)
+  intentScore      Int                       @default(0)
+  fitScore         Int                       @default(0)
+  opportunityScore Int                       @default(0)
+  scores           Json                      @default("{}")
+  summary          String?
+  dedupeKey        String
+  deletedAt        DateTime?
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  company          Company                   @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade)
+  sources          OpportunitySource[]
+  evidence         OpportunityEvidence[]
+  versions         OpportunityVersion[]
+  results          OpportunitySearchResult[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, dedupeKey])
+  @@index([workspaceId, status, intentScore])
+  @@index([workspaceId, companyId])
+  @@index([workspaceId, postedAt])
+  @@index([workspaceId, discoveredAt])
+}
+
+model OpportunitySource {
+  id              String      @id @default(uuid()) @db.Uuid
+  workspaceId     String      @db.Uuid
+  opportunityId   String      @db.Uuid
+  provider        String
+  kind            String
+  externalId      String
+  sourceUrl       String
+  title           String
+  description     String
+  postedAt        DateTime?
+  sourceUpdatedAt DateTime?
+  discoveredAt    DateTime    @default(now())
+  lastSeenAt      DateTime    @default(now())
+  contentHash     String
+  rawReference    Json
+  allowedExport   Boolean     @default(false)
+  expiresAt       DateTime
+  opportunity     Opportunity @relation(fields: [workspaceId, opportunityId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, externalId])
+  @@index([workspaceId, opportunityId])
+  @@index([workspaceId, expiresAt])
+}
+
+model OpportunityEvidence {
+  id                String      @id @default(uuid()) @db.Uuid
+  workspaceId       String      @db.Uuid
+  opportunityId     String      @db.Uuid
+  type              String
+  description       String
+  source            String
+  sourceUrl         String
+  occurredAt        DateTime?
+  discoveredAt      DateTime    @default(now())
+  confidence        Int
+  scoreContribution Int
+  rawReference      Json
+  opportunity       Opportunity @relation(fields: [workspaceId, opportunityId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@index([workspaceId, opportunityId])
+}
+
+model OpportunityVersion {
+  id            String      @id @default(uuid()) @db.Uuid
+  workspaceId   String      @db.Uuid
+  opportunityId String      @db.Uuid
+  sourceId      String
+  previousHash  String
+  currentHash   String
+  changedAt     DateTime    @default(now())
+  changedFields Json
+  opportunity   Opportunity @relation(fields: [workspaceId, opportunityId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@index([workspaceId, opportunityId, changedAt])
+}
+
+model OpportunitySearch {
+  id              String                    @id @default(uuid()) @db.Uuid
+  workspaceId     String                    @db.Uuid
+  createdById     String                    @db.Uuid
+  query           String
+  criteria        Json
+  providers       String[]
+  state           DiscoveryState            @default(QUEUED)
+  progress        Int                       @default(0)
+  steps           Json                      @default("{}")
+  providerResults Json                      @default("{}")
+  error           String?
+  found           Int                       @default(0)
+  qualified       Int                       @default(0)
+  savedSearchId   String?                   @db.Uuid
+  idempotencyKey  String
+  createdAt       DateTime                  @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  workspace       Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  results         OpportunitySearchResult[]
+  candidates      DiscoveryCandidate[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, createdAt])
+}
+
+model OpportunitySearchResult {
+  workspaceId   String            @db.Uuid
+  searchId      String            @db.Uuid
+  opportunityId String            @db.Uuid
+  search        OpportunitySearch @relation(fields: [workspaceId, searchId], references: [workspaceId, id], onDelete: Cascade)
+  opportunity   Opportunity       @relation(fields: [workspaceId, opportunityId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@id([workspaceId, searchId, opportunityId])
+}
+
+model ProviderConnection {
+  id                   String    @id @default(uuid()) @db.Uuid
+  workspaceId          String    @db.Uuid
+  provider             String
+  encryptedCredentials String?
+  config               Json      @default("{}")
+  enabled              Boolean   @default(true)
+  allowedSearch        Boolean   @default(false)
+  allowedStorage       Boolean   @default(false)
+  allowedEnrichment    Boolean   @default(false)
+  allowedExport        Boolean   @default(false)
+  allowedOutreach      Boolean   @default(false)
+  retentionDays        Int       @default(30)
+  status               String    @default("UNTESTED")
+  lastTestedAt         DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider])
+}
+
+model ProviderSync {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @db.Uuid
+  provider       String
+  operation      String
+  jobId          String?
+  state          String
+  recordsFound   Int       @default(0)
+  recordsCreated Int       @default(0)
+  recordsUpdated Int       @default(0)
+  duplicates     Int       @default(0)
+  requests       Int       @default(0)
+  credits        Float?
+  error          String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, provider, startedAt])
+}
+
+// Search evidence whose buyer has not yet been resolved. Never masquerades as a CRM lead.
+model DiscoveryCandidate {
+  id            String @id @default(uuid()) @db.Uuid
+  workspaceId   String @db.Uuid
+  searchId      String @db.Uuid
+  provider      String
+  sourceUrl     String
+  title         String
+  description   String
+  kind          String
+  postedAt      DateTime?
+  document      Json
+  status        String @default("REVIEW")
+  opportunityId String? @db.Uuid
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+  search        OpportunitySearch @relation(fields: [workspaceId, searchId], references: [workspaceId, id], onDelete: Cascade)
+  @@unique([workspaceId, searchId, sourceUrl])
+  @@index([workspaceId, status, createdAt])
 }

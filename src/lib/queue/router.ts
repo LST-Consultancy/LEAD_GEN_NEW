@@ -1,4 +1,7 @@
 import "server-only";
+import { runOpportunityAction } from "@/lib/services/opportunity-jobs";
+import { discoverOpportunities } from "@/lib/services/opportunity-ingestion";
+import { refreshOpportunityWatches } from "@/lib/services/opportunity-watches";
 import { JOB, type JobName } from "@/lib/queue/jobs";
 import { rescoreWorkspace } from "@/lib/queue/handlers/rescore";
 import {
@@ -7,7 +10,7 @@ import {
   purgeRecycleBin,
   rescoreWorklist,
 } from "@/lib/queue/handlers/maintenance";
-import { refreshNextBestActions, sweepNotifications } from "@/lib/queue/handlers/insights";
+import { generateCoachTips, refreshNextBestActions, sweepNotifications } from "@/lib/queue/handlers/insights";
 import { deliverWebhook } from "@/lib/queue/handlers/webhooks";
 import {
   advanceSequences,
@@ -28,6 +31,9 @@ export async function runJob(name: JobName, data: Record<string, unknown>): Prom
   if (!workspaceId) throw new Error(`Job ${name} received no workspaceId`);
 
   switch (name) {
+    case JOB.OPPORTUNITY_ACTION: return runOpportunityAction(workspaceId, data as Parameters<typeof runOpportunityAction>[1]);
+    case JOB.OPPORTUNITY_DISCOVERY: return discoverOpportunities(workspaceId, data.searchId as string);
+    case JOB.OPPORTUNITY_WATCHES: return refreshOpportunityWatches(workspaceId);
     case JOB.RESCORE_WORKSPACE:
       return rescoreWorkspace(workspaceId);
 
@@ -69,6 +75,9 @@ export async function runJob(name: JobName, data: Record<string, unknown>): Prom
 
     case JOB.AUDIT_PROPOSAL_TOTALS:
       return auditProposalTotals(workspaceId);
+
+    case JOB.GENERATE_COACH_TIPS:
+      return generateCoachTips(workspaceId);
 
     default: {
       // Exhaustiveness: adding a job name without a handler is a type error.

@@ -109,6 +109,28 @@ export const EMAIL_NOT_CONFIGURED =
   "screen is real — the sequence, its steps, the send window and the suppression checks all " +
   "run and are recorded. Connect a mailbox in Settings → Email Accounts to start sending.";
 
+/**
+ * Which providers have a delivery adapter written.
+ *
+ * Separate from whether a credential is present, because those are different
+ * problems with different fixes: a missing key is solved by adding one, a
+ * missing adapter is solved by changing provider. Collapsing them sent an admin
+ * hunting for credentials that nothing would have used.
+ */
+export const ADAPTER_BUILT: Record<EmailProviderName, boolean> = {
+  smtp: true,
+  resend: true,
+  ses: false,
+  postmark: false,
+  gmail: false,
+  outlook: false,
+};
+
+export function canActuallySend(): boolean {
+  const active = activeEmailProvider();
+  return active !== null && ADAPTER_BUILT[active];
+}
+
 export const REPLIES_NOT_READABLE =
   "The connected provider can send but cannot read replies, so stop-on-reply cannot be " +
   "honoured automatically. Enrolling leads is blocked until a mailbox that supports reading " +

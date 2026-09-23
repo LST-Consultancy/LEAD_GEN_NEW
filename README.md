@@ -419,9 +419,10 @@ real screen reading real rows; `PlannedPage` is no longer used by any route.
 What remains is *capability* gaps, not screen gaps, and each is named on the
 screen that would use it:
 
-- **No delivery adapter**, on any channel. Sequences step, enforce the send
-  window, check suppression and bounce limits, and record every hold with its
-  reason — but nothing is transmitted. The channel screens report how many of
+- **Email sends.** SMTP and Resend adapters are built and tested; set
+  `SMTP_URL` and `EMAIL_FROM` and sequences start delivering. **WhatsApp and
+  LinkedIn still do not send** — those need a WhatsApp Business Account and, for
+  LinkedIn, an API that does not exist. The channel screens report how many of
   your leads each one could reach, counted from contact records.
 - **LinkedIn automation is not coming.** There is no sanctioned API for
   third-party sending, so the screen states what the product will never do
@@ -526,12 +527,29 @@ not nonce, and the policy blocked it — the flash-of-white script, broken by th
 thing meant to protect it. The nonce is now threaded from middleware through the
 root layout into the provider.
 
+**Email delivery is built.** A queued message goes through every pre-send rule
+and then out over SMTP, spoken directly — no mail dependency, because the
+protocol is a dozen line-oriented commands and a library is a large amount of
+surface for that. The parts that actually break outbound are tested against a
+real SMTP server on loopback: multi-line replies (miss them and STARTTLS is
+never detected, so mail goes out in clear), dot-stuffing (a body line beginning
+with `.` truncates the message without it), RFC 2047 headers (a ₹ or a
+Devanagari name is otherwise mangled), and quoted-printable bodies.
+
+Failures are classified rather than lumped together: 4xx keeps the message
+queued for a later pass, 5xx does not, because retrying something a relay has
+already refused is how a sender's reputation degrades. A refused recipient is
+recorded against the message as a bounce, since that is a fact about the
+address rather than about this send.
+
 **Not done, and needed before real traffic:**
 
 - Metrics, tracing and alerting — logs are correlated, but nothing aggregates
   or watches them
-- Real integrations: the provider interface, six adapters' requirements and every
-  pre-send rule exist, but no delivery adapter is implemented, so nothing sends
+- WhatsApp and LinkedIn delivery — email sends, those two do not
+- Gmail, Outlook, SES and Postmark adapters; the interface and their
+  requirements exist, and the screen marks each "No adapter" rather than letting
+  a credential imply it works
 - Payment collection (GST is computed and shown on proposals, but nothing is invoiced or collected)
 - Observability beyond structured logs
 - Reviewing `connect-src` against whatever a deployment actually calls — the
@@ -545,6 +563,22 @@ Three of the fourteen registry tools are still unbuilt — `research_company`,
 `send_email` and `send_whatsapp` — and every screen that depends on one says so
 by name rather than degrading quietly. All three need something external: a
 licensed data source, an ESP, a WhatsApp Business Account.
+
+**Four AI features reach a model**, up from one: the Copilot, outreach
+drafting, score explanation and thread summarising.
+
+**`lead_verdict` explains a score without producing one.** `lib/scoring.ts`
+stays pure and deterministic; the model is handed the eight computed dimensions
+and the evidence rows behind them, and asked only to make them legible. That
+rule is *enforced*, not requested — `containsInventedNumber()` re-reads the
+reply and discards it if it states a figure that is not one of the computed
+ones. A prompt instruction would be a hope.
+
+**`summarise_thread` refuses short threads.** Below four exchanged messages it
+returns "reading it is faster than summarising it" and charges nothing, and it
+only reads messages that were actually exchanged — a queued or failed one was
+never seen by anyone, and summarising it as if it had been is a fact the reader
+would act on.
 
 **`draft_outreach` is built.** It grounds on two things and nothing else: the
 Knowledge Base, which bounds what may be claimed about what you sell, and the
@@ -613,3 +647,11 @@ validator before changing any `--chart-*` token.
       next-run time is in the *future* and `formatAge` clamps that to "just now".
 
   All ten are fixed and covered by tests.
+
+## Opportunity intelligence
+
+The `/find-leads` page now includes **Find Opportunities**, backed by persistent
+source evidence, deterministic intent scoring, provider adapters and BullMQ
+jobs. Configure credentials and permitted company boards at `/settings/providers`.
+See [the implementation and operations report](docs/opportunity-intelligence.md)
+for routes, migrations, setup, tested capabilities and explicit remaining scope.

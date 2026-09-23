@@ -214,7 +214,7 @@ export async function listSavedSearches(ctx: AuthContext) {
         /** How many it matches now, when the surface is one we can count. */
         matches,
         /** The filter no longer parses, so the search cannot run. */
-        broken: !parsed.success,
+        broken: s.surface === "opportunities" ? false : !parsed.success,
         /**
          * Alerts fire when *new* matches appear. With no discovery source,
          * new leads only arrive by import — so an alert can be correctly

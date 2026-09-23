@@ -327,6 +327,10 @@ const WIRED_FEATURES = [
   // `wired-features.test.ts` scans the source for the call.
   "natural_language_analytics",
   "draft_outreach",
+  "lead_verdict",
+  "summarise_thread",
+  "proposal_draft",
+  "coach_tip",
 ] as const;
 
 export function modelPlan(): { feature: string; model: string; priced: boolean }[] {

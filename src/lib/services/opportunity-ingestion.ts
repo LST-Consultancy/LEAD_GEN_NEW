@@ -1,0 +1,129 @@
+import "server-only";
+import { PartialDiscoveryError } from "@/lib/providers/opportunity-source";
+import { db } from "@/lib/db";
+import { extractOpportunity, type SourceDocument } from "@/lib/opportunities/extractor";
+import { hash, normalizedCompany, normalizedDomain, opportunityKey, canonicalUrl } from "@/lib/opportunities/identity";
+import { criteriaSchema, type SearchCriteria } from "@/lib/opportunities/query-parser";
+import { scoreOpportunity } from "@/lib/opportunities/scoring";
+import { DEFAULT_WEIGHTS, scoreLead, type ScoringWeights } from "@/lib/scoring";
+import { discoveryProvider, providerConfigSchema } from "@/lib/providers/discovery";
+import { decryptCredential } from "@/lib/providers/credentials";
+import { z } from "zod";
+import { DEFAULT_RULES } from "@/lib/opportunities/scoring";
+import type { Prisma } from "@/generated/prisma/client";
+
+export async function ingestOpportunity(workspaceId: string, searchId: string, doc: SourceDocument, criteria: SearchCriteria, policy: { allowedExport: boolean; retentionDays: number }, now = new Date()) {
+  const extracted = extractOpportunity(doc, criteria);
+  if (!extracted.relevant) return null;
+  if (!doc.company.name.trim()) {
+    await db.discoveryCandidate.upsert({ where: { workspaceId_searchId_sourceUrl: { workspaceId, searchId, sourceUrl: canonicalUrl(doc.sourceUrl) } },
+      create: { workspaceId, searchId, provider: doc.provider, sourceUrl: canonicalUrl(doc.sourceUrl), title: doc.title, description: doc.description, kind: doc.kind, postedAt: extracted.postedAt ? new Date(extracted.postedAt) : null, document: doc as unknown as Prisma.InputJsonValue, expiresAt: new Date(now.getTime() + policy.retentionDays * 86400000) }, update: {} });
+    return null;
+  }
+  if (!extracted.isProjectRequirement) return null;
+  if (criteria.opportunityTypes.length && !criteria.opportunityTypes.some(t => extracted.opportunityTypes.includes(t))) return null;
+  // Missing firmographics never satisfy an explicit filter.
+  if (criteria.employeeMin !== null && (doc.company.employees == null || doc.company.employees < criteria.employeeMin)) return null;
+  if (criteria.employeeMax !== null && (doc.company.employees == null || doc.company.employees > criteria.employeeMax)) return null;
+  if (criteria.locations.length && !criteria.locations.some(l => `${doc.company.country ?? ""} ${doc.location ?? ""}`.toLowerCase().includes(l.toLowerCase()))) return null;
+  if (criteria.industries.length && !criteria.industries.some(i => doc.company.industry?.toLowerCase().includes(i.toLowerCase()))) return null;
+  if (extracted.postedAt && (new Date(extracted.postedAt).getTime() < now.getTime() - criteria.dateRange.days * 86400000 || new Date(extracted.postedAt) > now)) return null;
+  const sourceUrl = canonicalUrl(doc.sourceUrl);
+  const contentHash = hash({ title: doc.title, description: doc.description, status: doc.status, postedAt: doc.postedAt, closingAt: doc.closingAt, location: doc.location });
+  return db.$transaction(async tx => {
+    // Serializes resolution and deduplication in this workspace, including worker retries.
+    await tx.$queryRaw`SELECT id FROM "Workspace" WHERE id = ${workspaceId}::uuid FOR UPDATE`;
+    const search = await tx.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
+    if (!search) throw new Error("Search does not belong to workspace.");
+    const prior = await tx.opportunitySource.findUnique({ where: { workspaceId_provider_externalId: { workspaceId, provider: doc.provider, externalId: doc.externalId } } });
+    const sameUrl = prior ?? await tx.opportunitySource.findFirst({ where: { workspaceId, sourceUrl } });
+    const domain = normalizedDomain(doc.company.domain);
+    let company = domain ? await tx.company.findFirst({ where: { workspaceId, domain, deletedAt: null } }) : null;
+    if (!company && !domain) {
+      const candidates = await tx.company.findMany({ where: { workspaceId, deletedAt: null, domain: null }, take: 500 });
+      company = candidates.find(c => normalizedCompany(c.name) === normalizedCompany(doc.company.name)) ?? null;
+    }
+    if (!company) company = await tx.company.create({ data: { workspaceId, name: doc.company.name, domain, website: domain ? `https://${domain}` : null, country: doc.company.country ?? "Unknown", industry: doc.company.industry, employeeCount: doc.company.employees } });
+    const key = opportunityKey(company.id, doc.title, extracted.location);
+    let existing = sameUrl ? await tx.opportunity.findFirst({ where: { id: sameUrl.opportunityId, workspaceId, deletedAt: null } }) : await tx.opportunity.findUnique({ where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: key } } });
+    if (sameUrl && !existing) return null; // Retained tombstones are not silently resurrected.
+    const config = await tx.scoringConfig.findUnique({ where: { workspaceId } });
+    const weights: ScoringWeights = config ? { fit: config.fitWeight, intent: config.intentWeight, urgency: config.urgencyWeight, authority: config.authorityWeight, budget: config.budgetWeight, reachability: config.reachabilityWeight, engagement: config.engagementWeight, recency: config.recencyWeight } : DEFAULT_WEIGHTS;
+    const icp = await tx.icpProfile.findFirst({ where: { workspaceId, deletedAt: null, isPrimary: true } });
+    const fit = icp ? scoreLead({ icp, company, role: { title: "", seniority: null, department: null, isDecisionMaker: false }, signals: [], contacts: [], engagement: { outboundCount: 0, inboundCount: 0, repliedAt: null, meetingsHeld: 0, proposalViews: 0 }, budget: { estimatedInr: null }, now }, weights).evidence.filter(e => e.dimension === "fit") : [];
+    const rules = z.record(z.string(),z.number().min(0).max(100)).safeParse(config?.opportunityRules ?? {});
+    const overrides = rules.success ? Object.fromEntries(Object.entries(rules.data).filter(([key])=>key in DEFAULT_RULES)) : {};
+    const score = scoreOpportunity(extracted, doc, now, weights, overrides, fit);
+    const changed = Boolean(prior && prior.contentHash !== contentHash);
+    const data = { activeRank: ["ACTIVE", "OPEN", "NEW"].includes(doc.status ?? "") ? 1 : 0, title: doc.title, service: extracted.service, types: extracted.opportunityTypes, technologies: extracted.technologies, requirements: extracted.requirements, location: extracted.location, postedAt: extracted.postedAt ? new Date(extracted.postedAt) : null, closingAt: extracted.closingAt ? new Date(extracted.closingAt) : null, status: doc.status ?? "UNKNOWN" as const, intentScore: score.intentScore, fitScore: score.fitScore, opportunityScore: score.opportunityScore, scores: { ...score.dimensions, fitEvidence: score.fitEvidence }, lastSeenAt: now, lastCheckedAt: now, ...(changed ? { lastChangedAt: now } : {}) };
+    // A weaker additional source must not overwrite stronger evidence.
+    const replaceScore = !existing || prior || score.intentScore > existing.intentScore;
+    if (existing) existing = await tx.opportunity.update({ where: { id: existing.id, workspaceId }, data: replaceScore ? data : { lastSeenAt: now, lastCheckedAt: now } });
+    else existing = await tx.opportunity.create({ data: { workspaceId, companyId: company.id, dedupeKey: key, discoveredAt: now, ...data } });
+    if (changed && prior) await tx.opportunityVersion.create({ data: { workspaceId, opportunityId: existing.id, sourceId: prior.id, previousHash: prior.contentHash, currentHash: contentHash, changedAt: now, changedFields: { ...(prior.title !== doc.title ? { title: { before: prior.title, after: doc.title } } : {}), ...(prior.description !== doc.description ? { description: { before: prior.description, after: doc.description } } : {}), sourceStatus: doc.status ?? "UNKNOWN" } } });
+    const sourceData = { title: doc.title, description: doc.description, sourceUrl, contentHash, postedAt: data.postedAt, sourceUpdatedAt: doc.updatedAt ? new Date(doc.updatedAt) : null, lastSeenAt: now, allowedExport: policy.allowedExport, rawReference: doc.rawSourceReference as Prisma.InputJsonValue, expiresAt: new Date(now.getTime() + policy.retentionDays * 86400000) };
+    await tx.opportunitySource.upsert({ where: { workspaceId_provider_externalId: { workspaceId, provider: doc.provider, externalId: doc.externalId } }, create: { workspaceId, opportunityId: existing.id, provider: doc.provider, kind: doc.kind, externalId: doc.externalId, discoveredAt: now, ...sourceData }, update: sourceData });
+    if (replaceScore) {
+      await tx.opportunityEvidence.deleteMany({ where: { workspaceId, opportunityId: existing.id } });
+      await tx.opportunityEvidence.createMany({ data: score.evidence.map(e => ({ workspaceId, opportunityId: existing!.id, ...e, source: doc.provider, sourceUrl, occurredAt: data.postedAt, discoveredAt: prior?.discoveredAt ?? now, rawReference: { excerpt: extracted.evidence[0], hash: contentHash } })) });
+    }
+    if (score.intentScore >= criteria.minimumIntent) await tx.opportunitySearchResult.upsert({ where: { workspaceId_searchId_opportunityId: { workspaceId, searchId, opportunityId: existing.id } }, create: { workspaceId, searchId, opportunityId: existing.id }, update: {} });
+    return { id: existing.id, changed, duplicate: Boolean(prior) };
+  }, { timeout: 20000 });
+}
+export async function discoverOpportunities(workspaceId: string, searchId: string) {
+  const search = await db.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
+  if (!search || ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"].includes(search.state)) return { skipped: true };
+  const member = await db.workspaceMember.findFirst({ where: { workspaceId, userId: search.createdById, deletedAt: null, workspace: { deletedAt: null } }, include: { role: true } });
+  if (!member?.role.permissions.includes("leads.edit")) {
+    await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state: "CANCELLED", error: "The requesting member no longer has discovery permission.", finishedAt: new Date() } });
+    return { skipped: true };
+  }
+  const criteria = criteriaSchema.parse(search.criteria);
+  await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state: "RUNNING", progress: 10, startedAt: new Date(), steps: { queryExpansion: "completed", sourceDiscovery: "running" } } });
+  const outcomes: Record<string, { status: string; found: number; message?: string }> = {};
+  let found = 0; let success = 0;
+  for (const provider of search.providers) {
+    const connection = await db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId, provider } } });
+    if (!connection?.enabled || !connection.allowedSearch || !connection.allowedStorage) { outcomes[provider] = { status: "NOT_CONNECTED", found: 0, message: "Connect this provider and confirm search/storage rights." }; continue; }
+    const sync = await db.providerSync.create({ data: { workspaceId, provider, operation: "search", jobId: searchId, state: "RUNNING" } });
+    try {
+      const adapter = discoveryProvider(workspaceId, provider, providerConfigSchema.parse(connection.config), connection.encryptedCredentials ? decryptCredential(connection.encryptedCredentials, workspaceId, provider) : undefined);
+      let documents: SourceDocument[]; let partial = false;
+      try { documents = await adapter.search(criteria); }
+      catch (error) { if (!(error instanceof PartialDiscoveryError) || !error.documents.length) throw error; documents = error.documents; partial = true; }
+      let created = 0; let duplicates = 0; let updated = 0;
+      for (const document of documents) {
+        const result = await ingestOpportunity(workspaceId, searchId, document, criteria, connection);
+        if (result?.changed) updated++; else if (result?.duplicate) duplicates++; else if (result) created++;
+      }
+      found += documents.length; if (!partial) success++;
+      outcomes[provider] = { status: partial ? "PARTIAL" : "COMPLETED", found: documents.length, ...(partial ? { message: "Some requests failed or reached quota. Retrieved matches were retained; narrow the search or retry later." } : {}) };
+      await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: partial ? "PARTIAL" : "COMPLETED", recordsFound: documents.length, recordsCreated: created, recordsUpdated: updated, duplicates, finishedAt: new Date() } });
+    } catch {
+      const message = "Provider discovery failed. Check credentials, permissions, response format and quota. Partial records may have been retained.";
+      outcomes[provider] = { status: "ERROR", found: 0, message };
+      await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: "FAILED", error: message, finishedAt: new Date() } });
+    }
+    await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { progress: Math.min(90, 10 + Math.round(Object.keys(outcomes).length / search.providers.length * 80)), providerResults: outcomes, found } });
+  }
+  const qualified = await db.opportunitySearchResult.count({ where: { workspaceId, searchId } });
+  const state = success === search.providers.length ? "COMPLETED" : success || found || qualified ? "PARTIAL" : "FAILED";
+  await db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "OpportunitySearch" WHERE id = ${searchId}::uuid AND "workspaceId" = ${workspaceId}::uuid FOR UPDATE`;
+    const current = await tx.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
+    if (current?.finishedAt) return;
+    await tx.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state, progress: 100, found, qualified, providerResults: outcomes, finishedAt: new Date(), error: state === "FAILED" ? "Search could not complete. Inspect source status." : null, steps: { queryExpansion: "completed", sourceDiscovery: state.toLowerCase(), deduplication: "completed", companyResolution: "completed", scoring: "completed", enrichment: "not_requested" } } });
+    if (search.savedSearchId && qualified) {
+      const currentResults = await tx.opportunitySearchResult.findMany({ where: { workspaceId, searchId }, select: { opportunityId: true } });
+      const previousResults = await tx.opportunitySearchResult.findMany({ where: { workspaceId, opportunityId: { in: currentResults.map(r => r.opportunityId) }, search: { workspaceId, savedSearchId: search.savedSearchId, id: { not: searchId }, finishedAt: { not: null } } }, select: { opportunityId: true } });
+      const known = new Set(previousResults.map(r => r.opportunityId));
+      const newCount = currentResults.filter(r => !known.has(r.opportunityId)).length;
+      if (newCount) {
+        await tx.notification.create({ data: { workspaceId, userId: search.createdById, kind: "LEAD_SIGNAL", title: "New opportunity matches", body: `${newCount} new matching opportunities. Review source evidence before outreach.`, href: `/opportunities?searchId=${searchId}` } });
+        await tx.savedSearch.updateMany({ where: { id: search.savedSearchId, workspaceId }, data: { lastAlertAt: new Date() } });
+      }
+    }
+  });
+  return { state, found, qualified };
+}

@@ -21,6 +21,7 @@ import { formatAge, formatInrCompact, formatNumber } from "@/lib/format";
 import { TIER } from "@/lib/vocab";
 
 type Account = {
+  opportunities: { id: string; title: string; intentScore: number; status: string }[];
   id: string;
   name: string;
   domain: string | null;
@@ -290,6 +291,7 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                     </div>
                   ) : null}
 
+                  <div className="space-y-2"><h3 className="text-sm font-semibold">Opportunities</h3>{a.opportunities.length ? a.opportunities.map(o => <Link key={o.id} href={`/opportunities/${o.id}`} className="block text-xs underline">{o.intentScore} · {o.title} · {o.status}</Link>) : <p className="text-xs text-secondary">No discovered opportunities.</p>}</div>
                   {a.recentSignals.length > 0 ? (
                     <div>
                       <p className="mb-1 text-2xs font-semibold uppercase tracking-wider text-muted">

@@ -225,6 +225,7 @@ export async function listAccounts(
     orderBy: [{ intentScore: "desc" }, { lastSignalAt: "desc" }],
     take: opts.limit ?? 60,
     include: {
+      opportunities: { where: { workspaceId: ctx.workspaceId, deletedAt: null }, select: { id: true, title: true, intentScore: true, status: true }, take: 10, orderBy: { intentScore: "desc" } },
       committee: {
         orderBy: { influence: "desc" },
         select: {
@@ -284,6 +285,7 @@ export async function listAccounts(
       technologies: c.technologies,
       intentScore: c.intentScore,
       lastSignalAt: c.lastSignalAt?.toISOString() ?? null,
+      opportunities: c.opportunities,
       signalCount: c._count.signals,
       conversationCount: c._count.conversations,
       recentSignals: c.signals.map((s) => ({

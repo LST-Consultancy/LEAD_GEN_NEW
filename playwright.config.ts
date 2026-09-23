@@ -62,8 +62,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:3000/login",
+    command: `npm run dev -- --port ${new URL(process.env.E2E_BASE_URL ?? "http://localhost:3000").port || "3000"}`,
+    url: `${process.env.E2E_BASE_URL ?? "http://localhost:3000"}/login`,
     reuseExistingServer: true,
     timeout: 180_000,
     stdout: "ignore",

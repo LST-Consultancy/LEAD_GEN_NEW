@@ -1,0 +1,3 @@
+-- Reconciled concurrent migration.
+-- 20260923050836_opportunity_subsystem already creates these exact tables, columns and enums.
+-- Schema-to-database diff verified empty before reconciliation. No data changes required.

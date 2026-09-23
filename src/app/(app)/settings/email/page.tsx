@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/context";
 import {
+  ADAPTER_BUILT,
   EMAIL_PROVIDERS,
   activeEmailProvider,
+  canActuallySend,
   canReceiveReplies,
 } from "@/lib/outreach/provider";
 import { getChannelReach } from "@/lib/services/channels";
@@ -42,8 +44,12 @@ export default async function EmailAccountsPage() {
 
   return (
     <EmailAccountsView
-      providers={Object.values(EMAIL_PROVIDERS)}
+      providers={Object.values(EMAIL_PROVIDERS).map((p) => ({
+        ...p,
+        adapterBuilt: ADAPTER_BUILT[p.name],
+      }))}
       active={activeEmailProvider()}
+      canSend={canActuallySend()}
       canReceive={canReceiveReplies()}
       reach={reach}
       domainChecks={DOMAIN_CHECKS}

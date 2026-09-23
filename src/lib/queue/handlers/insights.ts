@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { formatInrCompact } from "@/lib/format";
+import { generateCoachTip } from "@/lib/ai/coach";
 
 const DAY = 86_400_000;
 
@@ -348,4 +349,31 @@ export async function sweepNotifications(workspaceId: string) {
   }
 
   return { workspaceId, raised };
+}
+
+/**
+ * §13 — one coach tip per rep, from their own send/reply history.
+ *
+ * A member with too little send history to compare gets no tip rather than a
+ * generic one — `generateCoachTip` returns `insufficient_data` and this counts
+ * it separately, so a workspace of new reps doesn't read as the job failing.
+ */
+export async function generateCoachTips(workspaceId: string) {
+  const members = await db.workspaceMember.findMany({
+    where: { workspaceId, deletedAt: null },
+    select: { userId: true },
+  });
+
+  let created = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const { userId } of members) {
+    const result = await generateCoachTip(workspaceId, userId);
+    if (result.ok && result.created) created++;
+    else if (result.ok) skipped++;
+    else failed++;
+  }
+
+  return { workspaceId, membersConsidered: members.length, created, skipped, failed };
 }

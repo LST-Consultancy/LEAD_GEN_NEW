@@ -10,6 +10,9 @@ export const QUEUE_NAME = "signalroom";
 
 /** Every job the system knows how to run. */
 export const JOB = {
+  OPPORTUNITY_ACTION: "opportunity.action",
+  OPPORTUNITY_DISCOVERY: "opportunity.discovery",
+  OPPORTUNITY_WATCHES: "opportunity.watches",
   /** Re-runs the scoring engine over a workspace's leads. */
   RESCORE_WORKSPACE: "rescore.workspace",
   /** Re-runs the scoring engine for one lead, e.g. after a new signal. */
@@ -38,6 +41,8 @@ export const JOB = {
   EXPIRE_PROPOSALS: "proposals.expire",
   /** Verifies every live proposal's totals against its own line items. */
   AUDIT_PROPOSAL_TOTALS: "proposals.audit_totals",
+  /** Writes each rep's Today sales-coach tip from their own send/reply history. */
+  GENERATE_COACH_TIPS: "insights.generate_coach_tips",
 } as const;
 
 export type JobName = (typeof JOB)[keyof typeof JOB];
@@ -47,6 +52,9 @@ export type JobName = (typeof JOB)[keyof typeof JOB];
 // ---------------------------------------------------------------------------
 
 export type JobPayloads = {
+  [JOB.OPPORTUNITY_ACTION]: { workspaceId: string; userId: string; opportunityId: string; syncId: string; operation: "enrich" | "verify" | "research" };
+  [JOB.OPPORTUNITY_DISCOVERY]: { workspaceId: string; searchId: string };
+  [JOB.OPPORTUNITY_WATCHES]: { workspaceId: string };
   [JOB.RESCORE_WORKSPACE]: { workspaceId: string; reason?: string };
   [JOB.RESCORE_LEAD]: { workspaceId: string; leadId: string; reason?: string };
   [JOB.DETECT_DEAL_RISKS]: { workspaceId: string };
@@ -61,6 +69,7 @@ export type JobPayloads = {
   [JOB.WAKE_SNOOZED]: { workspaceId: string };
   [JOB.EXPIRE_PROPOSALS]: { workspaceId: string };
   [JOB.AUDIT_PROPOSAL_TOTALS]: { workspaceId: string };
+  [JOB.GENERATE_COACH_TIPS]: { workspaceId: string };
 };
 
 export type JobPayload<N extends JobName> = JobPayloads[N];
@@ -70,6 +79,9 @@ export const JOB_POLICY: Record<
   JobName,
   { attempts: number; backoffMs: number; timeoutMs: number }
 > = {
+  [JOB.OPPORTUNITY_ACTION]: { attempts: 2, backoffMs: 10000, timeoutMs: 300000 },
+  [JOB.OPPORTUNITY_DISCOVERY]: { attempts: 3, backoffMs: 10000, timeoutMs: 900000 },
+  [JOB.OPPORTUNITY_WATCHES]: { attempts: 3, backoffMs: 10000, timeoutMs: 120000 },
   [JOB.RESCORE_WORKSPACE]: { attempts: 3, backoffMs: 5_000, timeoutMs: 300_000 },
   [JOB.RESCORE_LEAD]: { attempts: 3, backoffMs: 2_000, timeoutMs: 30_000 },
   [JOB.DETECT_DEAL_RISKS]: { attempts: 3, backoffMs: 5_000, timeoutMs: 120_000 },
@@ -87,6 +99,9 @@ export const JOB_POLICY: Record<
   [JOB.WAKE_SNOOZED]: { attempts: 2, backoffMs: 10_000, timeoutMs: 30_000 },
   [JOB.EXPIRE_PROPOSALS]: { attempts: 2, backoffMs: 10_000, timeoutMs: 60_000 },
   [JOB.AUDIT_PROPOSAL_TOTALS]: { attempts: 2, backoffMs: 10_000, timeoutMs: 120_000 },
+  // One model call per rep with real send history, not per workspace, so this
+  // needs more room than a single-call AI job.
+  [JOB.GENERATE_COACH_TIPS]: { attempts: 2, backoffMs: 30_000, timeoutMs: 300_000 },
 };
 
 /**
@@ -94,6 +109,7 @@ export const JOB_POLICY: Record<
  * schedule rather than stacking a second copy of it.
  */
 export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: string }>> = {
+  [JOB.OPPORTUNITY_WATCHES]: { cron: "15 * * * *", describe: "Hourly — enqueue due saved opportunity searches without overlapping cadence windows." },
   [JOB.DETECT_DEAL_RISKS]: {
     cron: "0 */2 * * *",
     describe: "Every two hours — risk flags should be fresh when someone opens the board.",
@@ -144,6 +160,12 @@ export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: str
       "Nightly — a proposal whose total disagrees with its own line items is the worst thing " +
       "this product could show a customer, so it is checked rather than assumed.",
   },
+  [JOB.GENERATE_COACH_TIPS]: {
+    cron: "0 5 * * *",
+    describe:
+      "Daily at 05:00, after rescoring and next-actions — the comparison should reflect " +
+      "yesterday's real sends, not last week's.",
+  },
 };
 
 /**
@@ -156,6 +178,9 @@ export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: str
  */
 export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: false; because: string }> =
   {
+    [JOB.OPPORTUNITY_ACTION]: { allowed: false, because: "Requested after reviewing an opportunity." },
+    [JOB.OPPORTUNITY_DISCOVERY]: { allowed: false, because: "Started from Find Opportunities." },
+    [JOB.OPPORTUNITY_WATCHES]: { allowed: true },
     [JOB.RESCORE_WORKSPACE]: { allowed: true },
     [JOB.DETECT_DEAL_RISKS]: { allowed: true },
     [JOB.RESCORE_WORKLIST]: { allowed: true },
@@ -166,6 +191,7 @@ export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: fals
     [JOB.WAKE_SNOOZED]: { allowed: true },
     [JOB.EXPIRE_PROPOSALS]: { allowed: true },
     [JOB.AUDIT_PROPOSAL_TOTALS]: { allowed: true },
+    [JOB.GENERATE_COACH_TIPS]: { allowed: true },
     [JOB.RESCORE_LEAD]: {
       allowed: false,
       because: "Runs per lead, from the lead's own screen.",
@@ -191,6 +217,9 @@ export const TRIGGERABLE_JOBS = (Object.keys(MANUAL_TRIGGER) as JobName[]).filte
 
 /** Human labels for the job monitor. */
 export const JOB_LABEL: Record<JobName, string> = {
+  [JOB.OPPORTUNITY_ACTION]: "Enrich or research opportunity",
+  [JOB.OPPORTUNITY_DISCOVERY]: "Discover opportunities",
+  [JOB.OPPORTUNITY_WATCHES]: "Refresh opportunity watches",
   [JOB.RESCORE_WORKSPACE]: "Rescore all leads",
   [JOB.RESCORE_LEAD]: "Rescore one lead",
   [JOB.DETECT_DEAL_RISKS]: "Detect deal risks",
@@ -205,4 +234,5 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.WAKE_SNOOZED]: "Wake snoozed threads",
   [JOB.EXPIRE_PROPOSALS]: "Expire proposals",
   [JOB.AUDIT_PROPOSAL_TOTALS]: "Audit proposal totals",
+  [JOB.GENERATE_COACH_TIPS]: "Generate sales coach tips",
 };

@@ -1305,10 +1305,13 @@ describe("sendMessage", () => {
     const after = await db.message.findUniqueOrThrow({ where: { id: message.id } });
     expect(after.state).toBe("FAILED");
     expect(after.sentAt).toBeNull();
-    // Accurate about which part is missing: the provider is configured here,
-    // but this build has no delivery adapter.
-    expect(after.failureReason).toMatch(/no delivery adapter is built/);
+    // Accurate about which part is missing: gmail is configured here, but only
+    // SMTP and Resend have an adapter — so the message names the provider that
+    // cannot send *and* the ones that can, which is the actionable part.
     expect(after.failureReason).toMatch(/gmail/);
+    expect(after.failureReason).toMatch(/delivery adapter/);
+    expect(after.failureReason).toMatch(/smtp/);
+    expect(after.failureReason).toMatch(/Nothing was sent/);
   });
 
   it("holds a queued message rather than failing it when no mailbox is connected", async () => {

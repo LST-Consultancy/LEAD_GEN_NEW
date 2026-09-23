@@ -47,6 +47,8 @@ not chosen, and they pass in all-pairs mode in both themes.
 | A new lead source | `lib/ingest/sources.ts`, with honest `configured`/`requires`/`compliance` |
 | Parsing a pasted list | `lib/ingest/import.ts` — `parseDelimited` is pure and tested separately |
 | A rule that can stop a send | `lib/outreach/sendability.ts`, with a `scope` |
+| Actually transmitting an email | `lib/outreach/transport.ts`, then an adapter in `lib/outreach/adapters/*` |
+| Building the bytes of an email | `lib/outreach/mime.ts` — pure, and the hard parts are tested |
 | Choosing a recipient address | `lib/outreach/recipient.ts` — never inline, see below |
 | Outreach copy variables | `lib/outreach/template.ts`, and both resolvers must fill it |
 | Any money arithmetic | `lib/proposals/money.ts` — integer paise, never float rupees |
@@ -268,6 +270,22 @@ chunks — restart it afterwards. It can also make the *build* fail with
 before believing that one.
 
 ## Gotchas
+
+- **A 5xx from a relay must not be retried.** `sendEmail` returns `retryable`,
+  and the handler keeps a message QUEUED only when it is true. Retrying
+  something a relay has already refused permanently is how a sending domain's
+  reputation degrades, and the refusal will not change.
+- **An SMTP reply can span several lines.** `250-SIZE` continues, `250 SIZE`
+  ends. Reading only the first line makes EHLO capability detection wrong, and
+  the practical effect is that STARTTLS is never detected — so mail goes out in
+  clear against a server that offered TLS.
+- **A body line beginning with `.` must be doubled before DATA.** A lone `.` on
+  its own line is what ends the message, so an unescaped one truncates it
+  exactly there. `dotStuff` in `lib/outreach/mime.ts`.
+- **A credential is not an adapter.** `ADAPTER_BUILT` in
+  `lib/outreach/provider.ts` is separate from `isEmailConfigured()`, because a
+  key for a provider with no adapter makes every screen say "connected" and
+  still sends nothing. `canActuallySend()` is the one to gate on.
 
 - **A CSP nonce has to reach third-party inline scripts yourself.** Next stamps
   its own inline scripts with the nonce from the request's CSP header, but not

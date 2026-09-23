@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Isolate browser/build verification from an already-running development server.
+  distDir: process.env.SIGNALROOM_BUILD_DIR ?? ".next",
   // The floating dev badge sits on top of the sidebar's collapse control.
   devIndicators: false,
 

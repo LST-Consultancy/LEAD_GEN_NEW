@@ -20,12 +20,15 @@ import type { ChannelReach } from "@/lib/services/channels";
 export function EmailAccountsView({
   providers,
   active,
+  canSend,
   canReceive,
   reach,
   domainChecks,
 }: {
-  providers: ProviderDescriptor[];
+  providers: (ProviderDescriptor & { adapterBuilt: boolean })[];
   active: string | null;
+  /** Credentialled *and* backed by an adapter. Either alone sends nothing. */
+  canSend: boolean;
   canReceive: boolean;
   reach: ChannelReach;
   domainChecks: { record: string; purpose: string; failureMode: string }[];
@@ -41,27 +44,37 @@ export function EmailAccountsView({
         </p>
       </div>
 
-      {active ? (
+      {active && canSend ? (
         canReceive ? (
           <div className="rounded-lg border border-success-border bg-success-subtle px-3 py-2.5 text-xs text-success-text">
             <Check className="mr-1 inline size-3.5" />
-            <strong>{active}</strong> is credentialled and can read replies, so stop-on-reply can
-            be honoured.
+            <strong>{active}</strong> is connected and sending. It can read replies too, so
+            stop-on-reply is honoured automatically.
           </div>
         ) : (
           <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">
             <AlertTriangle className="mr-1 inline size-3.5" />
-            <strong>{active}</strong> can send but cannot read replies. Enrolling leads stays
-            blocked until a mailbox that reads is connected.
+            <strong>{active}</strong> is sending, but cannot read replies. Enrolling leads stays
+            blocked until a mailbox that reads is connected — a sequence that keeps emailing
+            someone who already answered is the fastest way to lose them.
           </div>
         )
+      ) : active ? (
+        <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">
+          <AlertTriangle className="mr-1 inline size-3.5" />
+          <strong>{active} is credentialled, but has no delivery adapter in this version.</strong>{" "}
+          Nothing sends. SMTP and Resend do have one — switching to either makes the same sequences
+          send without any other change.
+        </div>
       ) : (
         <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">
           <AlertTriangle className="mr-1 inline size-3.5" />
-          <strong>No mailbox is connected, and no delivery adapter is built.</strong> Nothing sends.
-          Everything around the send is real and running: sequences step on schedule, the send
-          window is enforced, suppression and bounce limits are checked, and every hold is recorded
-          with its reason — you can see exactly what would have gone out.
+          <strong>No mailbox is connected, so nothing sends.</strong> Everything around the send
+          is real and running: sequences step on schedule, the send window is enforced, suppression
+          and bounce limits are checked, and every hold is recorded with its reason. Set{" "}
+          <span className="font-mono">SMTP_URL</span> and{" "}
+          <span className="font-mono">EMAIL_FROM</span> and the same sequences start sending — the
+          SMTP and Resend adapters are built and tested.
         </div>
       )}
 
@@ -113,9 +126,9 @@ export function EmailAccountsView({
         </CardHeader>
         <CardContent className="flex flex-col gap-2 pt-0">
           <p className="text-2xs leading-relaxed text-muted">
-            The abstraction exists and the requirements below are accurate, but no adapter is
-            implemented — so setting a credential makes this screen say &ldquo;connected&rdquo; and
-            still sends nothing. That distinction is why it is stated rather than implied.
+            Two different things have to be true to send: a credential, and an adapter that knows
+            how to use it. Both are shown, because a credential for a provider with no adapter
+            sends nothing — and sends it silently.
           </p>
           {providers.map((p) => (
             <div
@@ -137,6 +150,23 @@ export function EmailAccountsView({
                   <Badge variant="neutral" size="sm">
                     Not connected
                   </Badge>
+                )}
+                {p.adapterBuilt ? (
+                  <Tooltip content="An adapter for this provider is written and tested, so a credential is all it needs.">
+                    <span className="cursor-help">
+                      <Badge variant="success" size="sm">
+                        Adapter built
+                      </Badge>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Tooltip content="No adapter in this version. A credential here would make the screen look connected and still send nothing.">
+                    <span className="cursor-help">
+                      <Badge variant="warning" size="sm">
+                        No adapter
+                      </Badge>
+                    </span>
+                  </Tooltip>
                 )}
                 {p.canReceive ? (
                   <Tooltip content="Can read replies, so stop-on-reply works and enrolment is allowed.">

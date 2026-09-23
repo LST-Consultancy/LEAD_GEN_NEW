@@ -218,3 +218,15 @@ export async function getRecentJobs(limit = 40) {
     return [];
   }
 }
+
+/** Redis worker connections, not a guess based on queued jobs. Bounded for settings. */
+export async function getWorkerReadiness(): Promise<{ configured: boolean; reachable: boolean; workers: number | null }> {
+  const q = queue();
+  if (!q) return { configured: false, reachable: false, workers: null };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const workers = await Promise.race([q.getWorkers(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Queue timeout")), 2500); })]);
+    return { configured: true, reachable: true, workers: workers.length };
+  } catch { return { configured: true, reachable: false, workers: null }; }
+  finally { if (timer) clearTimeout(timer); }
+}

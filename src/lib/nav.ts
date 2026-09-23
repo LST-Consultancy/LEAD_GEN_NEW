@@ -98,9 +98,10 @@ export const NAV: NavGroup[] = [
         purpose: "The central lead database with scoring, intent and filters.",
         keywords: ["prospects", "contacts", "people", "database"],
       },
+      { key: "opportunities", label: "Opportunities", href: "/opportunities", icon: Target, status: "live", phase: "Opportunity intelligence", purpose: "Source-backed requirements, evidence and change history." },
       {
         key: "find-leads",
-        label: "Find Leads",
+        label: "Find Opportunities",
         href: "/find-leads",
         icon: ScanSearch,
         status: "live",
@@ -694,6 +695,7 @@ export const NAV: NavGroup[] = [
         ],
         keywords: ["model context protocol", "claude", "cursor", "tools"],
       },
+      { key: "providers", label: "Lead Sources & APIs", href: "/settings/providers", icon: Database, status: "live", phase: "Opportunity intelligence", purpose: "Connect discovery and contact APIs, configure job boards, and check worker readiness.", keywords: ["brave", "signalhire", "adzuna", "hunter", "sources", "api", "workers"] },
       {
         key: "api-keys",
         label: "API Keys",
@@ -730,7 +732,7 @@ export const NAV: NavGroup[] = [
       },
       {
         key: "jobs",
-        label: "Background Jobs",
+        label: "Workers & Background Jobs",
         href: "/settings/jobs",
         icon: Workflow,
         status: "live",

@@ -3,7 +3,12 @@ import { db } from "@/lib/db";
 import type { AuthContext } from "@/lib/auth/context";
 import { isQueueConfigured } from "@/lib/queue/connection";
 import { isConfigured as isAiConfigured, activeProvider } from "@/lib/ai/provider";
-import { isEmailConfigured, activeEmailProvider, canReceiveReplies } from "@/lib/outreach/provider";
+import {
+  isEmailConfigured,
+  activeEmailProvider,
+  canActuallySend,
+  canReceiveReplies,
+} from "@/lib/outreach/provider";
 import { isCalendarConfigured } from "@/lib/services/bookings";
 import { isWhatsAppConfigured, WHATSAPP_ADAPTER_BUILT } from "@/lib/channels/whatsapp";
 import { RATE_LIMITS, rateLimit } from "@/lib/security/rate-limit";
@@ -55,12 +60,16 @@ export async function getSupportDiagnostics(
     },
     {
       name: "Email sending",
-      state: isEmailConfigured() ? (canReceiveReplies() ? "ok" : "degraded") : "off",
-      detail: isEmailConfigured()
+      // Three states, because a credential without an adapter sends nothing and
+      // looks identical to a working one unless it is said out loud.
+      state: canActuallySend() ? (canReceiveReplies() ? "ok" : "degraded") : "off",
+      detail: canActuallySend()
         ? canReceiveReplies()
-          ? `${activeEmailProvider()} is credentialled and can read replies.`
-          : `${activeEmailProvider()} can send but not read replies, so enrolment stays blocked — a sequence that ignores a reply loses the lead.`
-        : "No mailbox connected and no delivery adapter built. Nothing sends; sequences still step, hold and record why.",
+          ? `${activeEmailProvider()} is connected and sending, and can read replies.`
+          : `${activeEmailProvider()} is sending but cannot read replies, so enrolment stays blocked — a sequence that ignores a reply loses the lead.`
+        : isEmailConfigured()
+          ? `${activeEmailProvider()} is credentialled but has no delivery adapter in this version, so nothing sends. SMTP and Resend do have one.`
+          : "No mailbox connected, so nothing sends. Sequences still step, hold and record why. Set SMTP_URL and EMAIL_FROM to start sending.",
     },
     {
       name: "WhatsApp",

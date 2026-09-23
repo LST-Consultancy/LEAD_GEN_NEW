@@ -1,0 +1,17 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { api } from "@/lib/api/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import type { listDiscoveryCandidates } from "@/lib/services/discovery-review";
+type Match = Awaited<ReturnType<typeof listDiscoveryCandidates>>[number];
+function MatchCard({ item, canEdit }: { item: Match; canEdit: boolean }) {
+  const router = useRouter(); const [company, setCompany] = useState(""); const [domain, setDomain] = useState(""); const [country, setCountry] = useState(""); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false);
+  async function review(action: string) { setBusy(true); try { const result = await api.post<{ opportunityId: string | null }>(`/api/discovery-candidates/${item.id}`, { action, company, domain: domain || undefined, country: country || undefined }); if (result.opportunityId) router.push(`/opportunities/${result.opportunityId}`); else router.refresh(); } catch (e) { setMessage(e instanceof Error ? e.message : "Review failed."); } finally { setBusy(false); } }
+  return <article className="space-y-3 rounded-xl border border-border bg-surface p-5"><p className="text-xs text-secondary">{item.kind === "LINKEDIN_PUBLIC_POST" ? "Public LinkedIn search match" : "Web search match"} · Buyer unresolved · {item.postedAt ? new Date(item.postedAt).toLocaleDateString() : "Posting date unknown"}</p><a href={item.sourceUrl} target="_blank" rel="noreferrer" className="font-semibold underline">{item.title}</a><p className="text-sm text-secondary">{item.description}</p>{canEdit && <form onSubmit={e => { e.preventDefault(); void review("qualify"); }} className="space-y-3"><div className="grid gap-3 md:grid-cols-3"><label className="text-sm">Buying company<Input value={company} onChange={e => setCompany(e.target.value)} required minLength={2} /></label><label className="text-sm">Confirmed domain (optional)<Input value={domain} onChange={e => setDomain(e.target.value)} placeholder="company.com" /></label><label className="text-sm">Country (if confirmed)<Input value={country} onChange={e => setCountry(e.target.value)} /></label></div><p className="text-xs text-secondary">Confirm the buyer from the linked evidence. A publisher, recruiter or post author may not be the buyer. Original search filters still apply.</p><div className="flex gap-2"><Button disabled={busy}>Qualify opportunity</Button><Button type="button" variant="outline" disabled={busy} onClick={() => review("dismiss")}>Dismiss</Button></div></form>}{message && <p role="alert" className="text-sm text-danger-text">{message}</p>}</article>;
+}
+export function DiscoveryReview({ items, canEdit }: { items: Match[]; canEdit: boolean }) {
+  return <div className="space-y-5"><h1 className="text-2xl font-semibold">Discovery review</h1><p className="text-secondary">Web and public LinkedIn matches awaiting buyer confirmation. These are research candidates, not verified leads. Showing up to 100 recent matches.</p><Link href="/find-leads" className="text-sm underline">Find more opportunities</Link>{items.length ? items.map(item => <MatchCard key={item.id} item={item} canEdit={canEdit} />) : <p className="rounded-xl border border-border p-6">No matches awaiting review. Connect Brave and run a discovery search to collect public web evidence.</p>}</div>;
+}

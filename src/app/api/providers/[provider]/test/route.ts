@@ -1,0 +1,7 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { getAuthContext } from "@/lib/auth/context";
+import { handleApiError, unauthorized } from "@/lib/api/respond";
+import { testOpportunityProvider } from "@/lib/services/opportunity-providers";
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
+  try { const ctx = await getAuthContext(); if (!ctx) return unauthorized(); return NextResponse.json(await testOpportunityProvider(ctx, (await params).provider)); } catch (error) { return handleApiError(error); }
+}

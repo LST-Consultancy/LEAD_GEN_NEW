@@ -1,6 +1,8 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { isEmailConfigured, activeEmailProvider } from "@/lib/outreach/provider";
+import { sendEmail } from "@/lib/outreach/transport";
+import { log } from "@/lib/observability/log";
 import { render } from "@/lib/outreach/template";
 import { resolveRecipient, suppressionLookup } from "@/lib/outreach/recipient";
 import {
@@ -163,21 +165,82 @@ export async function sendMessage(workspaceId: string, messageId: string) {
     };
   }
 
-  // Everything up to here is real: the rules ran and this message passed them.
-  // What does not exist is the transport. Marking it SENT would make every
-  // downstream number a lie (§126), so it fails with an accurate reason.
-  const provider = activeEmailProvider();
-  await db.message.update({
-    where: { id: message.id },
-    data: {
-      state: "FAILED",
-      failureReason:
-        `${provider ? `The ${provider} provider is configured, but no delivery adapter is built in this version` : "No email provider is connected"}, ` +
-        "so this was not delivered. The message and its checks are kept; re-queue it once sending works.",
+  // The rules ran and this message passed them. Now it is actually sent.
+  const outcome = await sendEmail({
+    from: {
+      name: process.env.EMAIL_FROM_NAME || undefined,
+      email: message.fromAddress ?? process.env.EMAIL_FROM ?? "",
+    },
+    // Non-null: `checkSendable` blocks on a missing address before here.
+    to: { email: message.toAddress! },
+    subject: message.subject ?? "",
+    text: message.body,
+    html: message.bodyHtml ?? undefined,
+    headers: {
+      // Lets a reply be tied back to this message without parsing the subject,
+      // and gives bounce processing something stable to key on.
+      "X-Signalroom-Message-Id": message.id,
     },
   });
 
-  return { sent: false, blocked: ["no_adapter"], willRetry: false, disposition: "stop" as const };
+  if (!outcome.ok) {
+    // A retryable failure stays QUEUED so a later pass picks it up; a
+    // permanent one does not, because retrying something a relay has already
+    // refused is how a sender's reputation degrades.
+    await db.message.update({
+      where: { id: message.id },
+      data: {
+        state: outcome.retryable ? "QUEUED" : "FAILED",
+        failureReason: outcome.reason,
+        // A refused recipient is a fact about the address, not about this
+        // message, so it is recorded where the next send will see it.
+        ...(outcome.code === "rejected_recipient" ? { bouncedAt: new Date() } : {}),
+      },
+    });
+
+    log.queue.warn("send failed", {
+      messageId: message.id,
+      code: outcome.code,
+      retryable: outcome.retryable,
+      adapter: outcome.adapter,
+    });
+
+    return {
+      sent: false,
+      blocked: [outcome.code],
+      willRetry: outcome.retryable,
+      disposition: outcome.retryable ? ("reschedule" as const) : ("stop" as const),
+    };
+  }
+
+  await db.message.update({
+    where: { id: message.id },
+    data: {
+      state: "SENT",
+      sentAt: new Date(),
+      // The provider's own id, which is what a bounce or a delivery receipt
+      // will reference.
+      externalId: outcome.providerMessageId,
+      failureReason: null,
+    },
+  });
+
+  // The lead has now been contacted, which the next scoring run and every
+  // "went quiet" rule read.
+  if (message.conversation.leadId) {
+    await db.lead.update({
+      where: { id: message.conversation.leadId },
+      data: { lastContactedAt: new Date(), lastActivityAt: new Date() },
+    });
+  }
+
+  log.queue.info("sent", {
+    messageId: message.id,
+    adapter: outcome.adapter,
+    providerMessageId: outcome.providerMessageId,
+  });
+
+  return { sent: true, blocked: [], willRetry: false, disposition: "send" as const };
 }
 
 /** Sends made by one sequence since local midnight in its own timezone. */
