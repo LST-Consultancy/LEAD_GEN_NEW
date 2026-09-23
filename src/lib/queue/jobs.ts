@@ -43,6 +43,8 @@ export const JOB = {
   AUDIT_PROPOSAL_TOTALS: "proposals.audit_totals",
   /** Writes each rep's Today sales-coach tip from their own send/reply history. */
   GENERATE_COACH_TIPS: "insights.generate_coach_tips",
+  /** Writes each rep's Today "start here" recommendation from the day's counted facts. */
+  GENERATE_DAILY_BRIEFS: "insights.generate_daily_briefs",
 } as const;
 
 export type JobName = (typeof JOB)[keyof typeof JOB];
@@ -70,6 +72,7 @@ export type JobPayloads = {
   [JOB.EXPIRE_PROPOSALS]: { workspaceId: string };
   [JOB.AUDIT_PROPOSAL_TOTALS]: { workspaceId: string };
   [JOB.GENERATE_COACH_TIPS]: { workspaceId: string };
+  [JOB.GENERATE_DAILY_BRIEFS]: { workspaceId: string };
 };
 
 export type JobPayload<N extends JobName> = JobPayloads[N];
@@ -102,6 +105,7 @@ export const JOB_POLICY: Record<
   // One model call per rep with real send history, not per workspace, so this
   // needs more room than a single-call AI job.
   [JOB.GENERATE_COACH_TIPS]: { attempts: 2, backoffMs: 30_000, timeoutMs: 300_000 },
+  [JOB.GENERATE_DAILY_BRIEFS]: { attempts: 2, backoffMs: 30_000, timeoutMs: 300_000 },
 };
 
 /**
@@ -166,6 +170,10 @@ export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: str
       "Daily at 05:00, after rescoring and next-actions — the comparison should reflect " +
       "yesterday's real sends, not last week's.",
   },
+  [JOB.GENERATE_DAILY_BRIEFS]: {
+    cron: "5 5 * * *",
+    describe: "Daily at 05:05, just after coach tips — both read the same overnight state.",
+  },
 };
 
 /**
@@ -192,6 +200,7 @@ export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: fals
     [JOB.EXPIRE_PROPOSALS]: { allowed: true },
     [JOB.AUDIT_PROPOSAL_TOTALS]: { allowed: true },
     [JOB.GENERATE_COACH_TIPS]: { allowed: true },
+    [JOB.GENERATE_DAILY_BRIEFS]: { allowed: true },
     [JOB.RESCORE_LEAD]: {
       allowed: false,
       because: "Runs per lead, from the lead's own screen.",
@@ -235,4 +244,5 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.EXPIRE_PROPOSALS]: "Expire proposals",
   [JOB.AUDIT_PROPOSAL_TOTALS]: "Audit proposal totals",
   [JOB.GENERATE_COACH_TIPS]: "Generate sales coach tips",
+  [JOB.GENERATE_DAILY_BRIEFS]: "Generate daily briefs",
 };

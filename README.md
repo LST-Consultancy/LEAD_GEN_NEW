@@ -652,6 +652,6 @@ validator before changing any `--chart-*` token.
 
 The `/find-leads` page now includes **Find Opportunities**, backed by persistent
 source evidence, deterministic intent scoring, provider adapters and BullMQ
-jobs. Configure credentials and permitted company boards at `/settings/providers`.
+jobs. Open **Settings → Lead Sources & APIs** (`/settings/providers`) for provider credentials, editable board forms, API tests, retention settings and live worker connection status. Brave searches public web/LinkedIn snippets without a company list; Adzuna finds hiring companies across selected country markets; Greenhouse, Lever and Ashby read configured boards. Hunter and SignalHire supply decision-maker work emails. Unresolved web buyers appear in `/opportunities/review` for source-backed confirmation. Direct Sales Navigator search still requires approved partner access.
 See [the implementation and operations report](docs/opportunity-intelligence.md)
 for routes, migrations, setup, tested capabilities and explicit remaining scope.

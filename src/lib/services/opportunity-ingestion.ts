@@ -11,6 +11,8 @@ import { decryptCredential } from "@/lib/providers/credentials";
 import { z } from "zod";
 import { DEFAULT_RULES } from "@/lib/opportunities/scoring";
 import type { Prisma } from "@/generated/prisma/client";
+import { complete } from "@/lib/ai/complete";
+import { BUYER_SYSTEM_PROMPT, buyerPrompt, parseBuyerReply, screenUnattributed, verifyBuyer, type BuyerAttribution, type ScreenReason } from "@/lib/opportunities/buyer";
 
 export async function ingestOpportunity(workspaceId: string, searchId: string, doc: SourceDocument, criteria: SearchCriteria, policy: { allowedExport: boolean; retentionDays: number }, now = new Date()) {
   const extracted = extractOpportunity(doc, criteria);
@@ -37,15 +39,17 @@ export async function ingestOpportunity(workspaceId: string, searchId: string, d
     if (!search) throw new Error("Search does not belong to workspace.");
     const prior = await tx.opportunitySource.findUnique({ where: { workspaceId_provider_externalId: { workspaceId, provider: doc.provider, externalId: doc.externalId } } });
     const sameUrl = prior ?? await tx.opportunitySource.findFirst({ where: { workspaceId, sourceUrl } });
+    const sourceOpportunity = sameUrl ? await tx.opportunity.findFirst({ where: { id: sameUrl.opportunityId, workspaceId, deletedAt: null }, include: { company: true } }) : null;
+    if (sameUrl && !sourceOpportunity) return null;
     const domain = normalizedDomain(doc.company.domain);
-    let company = domain ? await tx.company.findFirst({ where: { workspaceId, domain, deletedAt: null } }) : null;
+    let company = sourceOpportunity?.company ?? (domain ? await tx.company.findFirst({ where: { workspaceId, domain, deletedAt: null } }) : null);
     if (!company && !domain) {
       const candidates = await tx.company.findMany({ where: { workspaceId, deletedAt: null, domain: null }, take: 500 });
       company = candidates.find(c => normalizedCompany(c.name) === normalizedCompany(doc.company.name)) ?? null;
     }
     if (!company) company = await tx.company.create({ data: { workspaceId, name: doc.company.name, domain, website: domain ? `https://${domain}` : null, country: doc.company.country ?? "Unknown", industry: doc.company.industry, employeeCount: doc.company.employees } });
     const key = opportunityKey(company.id, doc.title, extracted.location);
-    let existing = sameUrl ? await tx.opportunity.findFirst({ where: { id: sameUrl.opportunityId, workspaceId, deletedAt: null } }) : await tx.opportunity.findUnique({ where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: key } } });
+    let existing = sourceOpportunity ?? await tx.opportunity.findUnique({ where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: key } } });
     if (sameUrl && !existing) return null; // Retained tombstones are not silently resurrected.
     const config = await tx.scoringConfig.findUnique({ where: { workspaceId } });
     const weights: ScoringWeights = config ? { fit: config.fitWeight, intent: config.intentWeight, urgency: config.urgencyWeight, authority: config.authorityWeight, budget: config.budgetWeight, reachability: config.reachabilityWeight, engagement: config.engagementWeight, recency: config.recencyWeight } : DEFAULT_WEIGHTS;
@@ -71,6 +75,46 @@ export async function ingestOpportunity(workspaceId: string, searchId: string, d
     return { id: existing.id, changed, duplicate: Boolean(prior) };
   }, { timeout: 20000 });
 }
+const AI_BATCH = 20;
+const withBuyer = (doc: SourceDocument, company: { name: string; domain?: string }, attribution: BuyerAttribution): SourceDocument =>
+  ({ ...doc, company: { ...doc.company, ...company }, rawSourceReference: { ...doc.rawSourceReference, buyerAttribution: attribution } });
+
+/**
+ * Names the buyer on results that arrive without one, or sets them aside with a counted reason.
+ * Rules decide first; the model is asked only about what the rules cannot, and its answer must be
+ * a name and quote that literally appear in the text. Nothing unattributed reaches ingestion.
+ */
+export async function resolveBuyers(workspaceId: string, documents: SourceDocument[], criteria: SearchCriteria) {
+  const kept: SourceDocument[] = []; const askAi: SourceDocument[] = [];
+  const screened: Partial<Record<ScreenReason, number>> = {};
+  const count = (reason: ScreenReason, n = 1) => { screened[reason] = (screened[reason] ?? 0) + n; };
+  for (const doc of documents) {
+    if (doc.company.name.trim()) { kept.push(doc); continue; }
+    const s = screenUnattributed(doc, extractOpportunity(doc, criteria));
+    if (s.verdict === "drop") count(s.reason);
+    else if (s.verdict === "resolved") kept.push(withBuyer(doc, s.company, s.attribution));
+    else askAi.push(doc);
+  }
+  for (let i = 0; i < askAi.length; i += AI_BATCH) {
+    const batch = askAi.slice(i, i + AI_BATCH);
+    const reply = await complete({ workspaceId, userId: null }, { feature: "buyer_attribution", system: BUYER_SYSTEM_PROMPT, prompt: buyerPrompt(batch), maxTokens: 6000, timeoutMs: 60_000 });
+    if (!reply.ok) { count("ai_unavailable", batch.length); continue; }
+    const proposals = new Map(parseBuyerReply(reply.text).map(p => [p.i, p]));
+    batch.forEach((doc, j) => {
+      const proposal = proposals.get(j);
+      const verified = proposal ? verifyBuyer(doc, criteria, proposal) : null;
+      if (verified) kept.push(withBuyer(doc, { name: verified.name }, { method: "named_in_text", quote: verified.quote, model: reply.model }));
+      else count("no_named_buyer");
+    });
+  }
+  return { kept, screened };
+}
+
+/** Only an unfinished search can be failed, so a worker that finishes concurrently wins. Returns whether it changed. */
+export async function failOpportunitySearch(workspaceId: string, searchId: string, error: string) {
+  const { count } = await db.opportunitySearch.updateMany({ where: { id: searchId, workspaceId, state: { in: ["QUEUED", "RUNNING"] }, finishedAt: null }, data: { state: "FAILED", error, finishedAt: new Date() } });
+  return count > 0;
+}
 export async function discoverOpportunities(workspaceId: string, searchId: string) {
   const search = await db.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
   if (!search || ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"].includes(search.state)) return { skipped: true };
@@ -81,7 +125,7 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
   }
   const criteria = criteriaSchema.parse(search.criteria);
   await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state: "RUNNING", progress: 10, startedAt: new Date(), steps: { queryExpansion: "completed", sourceDiscovery: "running" } } });
-  const outcomes: Record<string, { status: string; found: number; message?: string }> = {};
+  const outcomes: Record<string, { status: string; found: number; message?: string; screened?: Partial<Record<ScreenReason, number>> }> = {};
   let found = 0; let success = 0;
   for (const provider of search.providers) {
     const connection = await db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId, provider } } });
@@ -93,12 +137,13 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
       try { documents = await adapter.search(criteria); }
       catch (error) { if (!(error instanceof PartialDiscoveryError) || !error.documents.length) throw error; documents = error.documents; partial = true; }
       let created = 0; let duplicates = 0; let updated = 0;
-      for (const document of documents) {
+      const { kept, screened } = await resolveBuyers(workspaceId, documents, criteria);
+      for (const document of kept) {
         const result = await ingestOpportunity(workspaceId, searchId, document, criteria, connection);
         if (result?.changed) updated++; else if (result?.duplicate) duplicates++; else if (result) created++;
       }
       found += documents.length; if (!partial) success++;
-      outcomes[provider] = { status: partial ? "PARTIAL" : "COMPLETED", found: documents.length, ...(partial ? { message: "Some requests failed or reached quota. Retrieved matches were retained; narrow the search or retry later." } : {}) };
+      outcomes[provider] = { status: partial ? "PARTIAL" : "COMPLETED", found: documents.length, screened, ...(partial ? { message: "Some requests failed or reached quota. Retrieved matches were retained; narrow the search or retry later." } : {}) };
       await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: partial ? "PARTIAL" : "COMPLETED", recordsFound: documents.length, recordsCreated: created, recordsUpdated: updated, duplicates, finishedAt: new Date() } });
     } catch {
       const message = "Provider discovery failed. Check credentials, permissions, response format and quota. Partial records may have been retained.";

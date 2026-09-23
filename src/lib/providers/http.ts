@@ -4,18 +4,19 @@ import { rateLimit } from "@/lib/security/rate-limit";
 import { getRedis } from "@/lib/queue/connection";
 import { db } from "@/lib/db";
 // Fixed documented vendor hosts only. Arbitrary URLs, redirects and crawler requests are refused.
-const HOSTS = new Set(["api.search.brave.com", "boards-api.greenhouse.io", "api.lever.co", "api.hunter.io", "api.adzuna.com", "api.ashbyhq.com", "www.signalhire.com"]);
+const HOSTS = new Set(["api.search.brave.com", "boards-api.greenhouse.io", "api.lever.co", "api.hunter.io", "api.adzuna.com", "api.ashbyhq.com", "www.signalhire.com", "api.apify.com"]);
 export function validateProviderUrl(raw: string) {
   const u = new URL(raw);
   if (u.protocol !== "https:" || !HOSTS.has(u.hostname) || u.port || u.username || u.password) throw new Error("Provider destination is not permitted.");
   return u;
 }
-export async function providerJson(workspaceId: string, provider: string, url: string, headers: Record<string, string> = {}, body?: Record<string, unknown>): Promise<unknown> {
+export async function providerJson(workspaceId: string, provider: string, url: string, headers: Record<string, string> = {}, body?: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<unknown> {
+  const timeoutMs = opts.timeoutMs ?? 15000;
   const u = validateProviderUrl(url);
   const redis = getRedis();
   if (!redis) throw new Error("Provider requests require Redis for shared limits and concurrency.");
   const lockKey = `provider-lock:${workspaceId}:${provider}`; const token = randomUUID();
-  if (await redis.set(lockKey, token, "EX", 120, "NX") !== "OK") throw new Error("Another request to this provider is active. Retry shortly.");
+  if (await redis.set(lockKey, token, "EX", Math.max(120, Math.ceil(timeoutMs / 1000) + 30), "NX") !== "OK") throw new Error("Another request to this provider is active. Retry shortly.");
   try {
     for (let attempt = 0; attempt < (body ? 1 : 3); attempt++) {
       for (const [windowSeconds, limit] of [[60, 20], [3600, 300], [86400, 1500]]) {
@@ -25,7 +26,7 @@ export async function providerJson(workspaceId: string, provider: string, url: s
       const request = await db.providerSync.create({ data: { workspaceId, provider, operation: "http_request", state: "RUNNING", requests: 1 } });
       let response: Response;
       try {
-        response = await fetch(u, { method: body ? "POST" : "GET", body: body ? JSON.stringify(body) : undefined, headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), ...headers }, redirect: "error", signal: AbortSignal.timeout(15000), cache: "no-store" });
+        response = await fetch(u, { method: body ? "POST" : "GET", body: body ? JSON.stringify(body) : undefined, headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), ...headers }, redirect: "error", signal: AbortSignal.timeout(timeoutMs), cache: "no-store" });
         if (response.ok) {
           const reader = response.body?.getReader(); if (!reader) throw new Error("Empty provider response.");
           let size = 0; const chunks: Uint8Array[] = [];

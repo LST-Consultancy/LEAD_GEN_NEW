@@ -107,6 +107,60 @@ export function AiSalesCoach({ coach }: { coach: Coach | null }) {
   );
 }
 
+type DailyBrief = {
+  id: string;
+  title: string;
+  body: string;
+  evidence: unknown;
+  createdAt: string;
+};
+
+/**
+ * §6 — the AI complement to the deterministic Copilot brief above it. That
+ * brief is counted facts with no generated prose by design; this is the one
+ * sentence of prose that says which of those facts to act on first. Absent on
+ * a quiet day, deliberately — there is nothing to prioritise.
+ */
+export function AiDailyPriority({ brief }: { brief: DailyBrief | null }) {
+  if (!brief) return null;
+
+  const evidence = Array.isArray(brief.evidence)
+    ? (brief.evidence as { label: string; href?: string }[])
+    : [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-1.5">
+          <Sparkles className="size-3.5 text-ai-accent" />
+          Start here
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-xs font-semibold text-primary">{brief.title}</p>
+        <p className="text-xs leading-relaxed text-secondary">{brief.body}</p>
+        {evidence.length > 0 ? (
+          <ul className="flex flex-wrap gap-x-3 gap-y-1 border-t border-border-subtle pt-2">
+            {evidence.map((e, i) =>
+              e.href ? (
+                <li key={i}>
+                  <Link href={e.href} className="text-2xs text-brand-text hover:underline">
+                    {e.label}
+                  </Link>
+                </li>
+              ) : (
+                <li key={i} className="text-2xs text-muted">
+                  {e.label}
+                </li>
+              )
+            )}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 type Digest = {
   runCount: number;
   mode: string;

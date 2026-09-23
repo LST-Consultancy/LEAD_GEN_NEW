@@ -82,7 +82,7 @@ function netMovement(
  * failure in one panel degrades that panel rather than the whole screen (§96).
  */
 export async function getToday(ctx: AuthContext) {
-  const [brief, revenue, worklist, leadOfDay, health, motion, heatmap, coach, digest, notes] =
+  const [brief, revenue, worklist, leadOfDay, health, motion, heatmap, coach, digest, notes, dailyBrief] =
     await Promise.all([
       getChangesSinceYesterday(ctx),
       getRevenueInReach(ctx),
@@ -94,9 +94,10 @@ export async function getToday(ctx: AuthContext) {
       getCoachTip(ctx),
       getAutopilotDigest(ctx),
       getStickyNotes(ctx),
+      getDailyBriefInsight(ctx),
     ]);
 
-  return { brief, revenue, worklist, leadOfDay, health, motion, heatmap, coach, digest, notes };
+  return { brief, revenue, worklist, leadOfDay, health, motion, heatmap, coach, digest, notes, dailyBrief };
 }
 
 // --------------------------------------------------------------------------
@@ -836,6 +837,27 @@ export async function getCoachTip(ctx: AuthContext) {
         whyNow: insight.whyNow,
         evidence: insight.evidence,
         confidence: insight.confidence,
+        createdAt: insight.createdAt,
+      })
+    : null;
+}
+
+export async function getDailyBriefInsight(ctx: AuthContext) {
+  const insight = await db.aIInsight.findFirst({
+    where: {
+      workspaceId: ctx.workspaceId,
+      kind: "DAILY_BRIEF",
+      dismissedAt: null,
+      OR: [{ forUserId: ctx.userId }, { forUserId: null }],
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return insight
+    ? toPlain({
+        id: insight.id,
+        title: insight.title,
+        body: insight.body,
+        evidence: insight.evidence,
         createdAt: insight.createdAt,
       })
     : null;

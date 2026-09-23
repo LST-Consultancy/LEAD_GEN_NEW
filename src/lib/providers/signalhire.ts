@@ -15,7 +15,7 @@ export function signalHireProvider(workspaceId: string, apiKey: string) {
         if (row.status !== "success" || !row.candidate) return [];
         const p = row.candidate;
         const role = p.experience?.find(e => e.current === true && (normalizedCompany(e.company) === normalizedCompany(company) || (domain && e.website && normalizedDomain(e.website) === normalizedDomain(domain))));
-        if (!role?.position) return [];
+        if (!role?.position || (domain && role.website && normalizedDomain(role.website) !== normalizedDomain(domain))) return [];
         // Only work emails. A provider confidence rating is not a fresh verification.
         const names = p.fullName.trim().split(/\s+/);
         return (p.contacts ?? []).filter(c => c.type === "email" && c.subType === "work" && z.string().email().safeParse(c.value).success).map(c => ({ email: c.value, firstName: names[0], lastName: names.slice(1).join(" ") || null, title: role.position!, confidence: c.rating ?? 0, sources: [`signalhire:${p.uid}`] }));

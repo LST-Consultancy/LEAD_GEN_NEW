@@ -9,6 +9,7 @@ import {
   type JobPayload,
 } from "@/lib/queue/jobs";
 import { log } from "@/lib/observability/log";
+import type { SearchJobOutcome } from "@/lib/opportunities/search-status";
 
 const globalForQueue = globalThis as unknown as { srQueue?: Queue | null };
 
@@ -217,6 +218,29 @@ export async function getRecentJobs(limit = 40) {
     log.queue.warn("recent jobs unavailable", { err });
     return [];
   }
+}
+
+/** Where a job actually is, so a record that still says "queued" can be checked against the queue. */
+export async function getJobOutcome(jobId: string): Promise<SearchJobOutcome> {
+  const q = queue();
+  if (!q) return { state: "unavailable" };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Queue timeout")), 2500); });
+  try {
+    const job = await Promise.race([q.getJob(safeJobId(jobId)), timeout]);
+    if (!job) return { state: "missing" };
+    // BullMQ reports "failed" only once retries are exhausted; a retry in backoff is "delayed".
+    const state = await Promise.race([job.getState(), timeout]);
+    if (state === "failed") return { state: "failed", reason: job.failedReason ?? "", attempts: job.attemptsMade };
+    if (state === "waiting" || state === "prioritized") {
+      const workers = await Promise.race([q.getWorkers(), timeout]);
+      return { state: "waiting", workers: workers.length };
+    }
+    return { state: "in_progress" };
+  } catch (err) {
+    log.queue.warn("job outcome unavailable", { jobId, err });
+    return { state: "unavailable" };
+  } finally { if (timer) clearTimeout(timer); }
 }
 
 /** Redis worker connections, not a guess based on queued jobs. Bounded for settings. */

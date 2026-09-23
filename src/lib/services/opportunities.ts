@@ -7,7 +7,9 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { mutate, MutationError, loadScoped } from "./mutate";
 import { toPlain } from "@/lib/serialize";
 import { parseOpportunityQuery, criteriaSchema, opportunityTypes } from "@/lib/opportunities/query-parser";
-import { enqueue } from "@/lib/queue/producer";
+import { enqueue, getJobOutcome } from "@/lib/queue/producer";
+import { judgeSearchJob } from "@/lib/opportunities/search-status";
+import { failOpportunitySearch } from "./opportunity-ingestion";
 import { JOB } from "@/lib/queue/jobs";
 import { isQueueConfigured } from "@/lib/queue/connection";
 import { rateLimit } from "@/lib/security/rate-limit";
@@ -67,7 +69,18 @@ export async function getOpportunity(ctx: AuthContext, id: string) {
 export async function getOpportunitySearch(ctx: AuthContext, id: string) {
   z.string().uuid().parse(id);
   opportunityReadPermission(ctx);
-  return toPlain(await loadScoped(() => db.opportunitySearch.findFirst({ where: { id, workspaceId: ctx.workspaceId } }), "That search"));
+  const find = () => db.opportunitySearch.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
+  let search = await loadScoped(find, "That search");
+  let notice: string | null = null;
+  // The row alone cannot tell "waiting" from "its job died": a dead job never writes back.
+  if (search.state === "QUEUED" || search.state === "RUNNING") {
+    const verdict = judgeSearchJob(await getJobOutcome(search.id), search.createdAt, new Date());
+    if (verdict && "fail" in verdict) { await failOpportunitySearch(ctx.workspaceId, search.id, verdict.fail); search = await loadScoped(find, "That search"); }
+    else if (verdict) notice = verdict.notice;
+  }
+  // Same filter as listDiscoveryCandidates, so the count matches the review screen it links to.
+  const needsReview = await db.discoveryCandidate.count({ where: { workspaceId: ctx.workspaceId, searchId: search.id, status: "REVIEW", expiresAt: { gt: new Date() } } });
+  return toPlain({ ...search, notice, needsReview });
 }
 export async function opportunityPeople(ctx: AuthContext, companyId: string) {
   opportunityReadPermission(ctx);

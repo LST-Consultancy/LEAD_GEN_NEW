@@ -74,7 +74,7 @@ test.afterAll(async () => { await pool.end(); });
 
 test("settings exposes lead APIs, worker readiness and provider-specific controls", async ({ page }) => {
   await page.goto("/settings");
-  await page.locator("#main").getByRole("link", { name: /Lead Sources & APIs/ }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Lead Sources & APIs", exact: true }).click();
   await expect(page.locator("#main").getByRole("heading", { name: "Discovery readiness" })).toBeVisible();
   await expect(page.locator("#main").getByRole("link", { name: "Workers & background jobs", exact: true })).toHaveAttribute("href", "/settings/jobs");
   const form = page.locator("#provider-form");

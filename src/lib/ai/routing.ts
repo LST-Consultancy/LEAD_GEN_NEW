@@ -33,6 +33,7 @@ export const FEATURE_TIER: Record<string, ModelTier> = {
   summarise_thread: "fast",
   classify_signal: "fast",
   extract_entities: "fast",
+  buyer_attribution: "fast",
   coach_tip: "fast",
   draft_outreach: "reasoning",
   deep_research: "reasoning",

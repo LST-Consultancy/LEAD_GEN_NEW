@@ -8,6 +8,7 @@ import { RevenueInReach, RevenueInMotion } from "@/components/today/revenue";
 import { Worklist, type WorklistItem } from "@/components/today/worklist";
 import { SalesHealth } from "@/components/today/health";
 import {
+  AiDailyPriority,
   AiSalesCoach,
   DemandIndexTeaser,
   MorningBriefing,
@@ -45,6 +46,7 @@ export function TodayView({
     coach: React.ComponentProps<typeof AiSalesCoach>["coach"];
     digest: React.ComponentProps<typeof WhileYouSlept>["digest"];
     notes: React.ComponentProps<typeof StickyNotes>["notes"];
+    dailyBrief: React.ComponentProps<typeof AiDailyPriority>["brief"];
   };
   initialLayout: Layout;
 }) {
@@ -132,6 +134,7 @@ export function TodayView({
               })
             }
           />
+          <AiDailyPriority brief={data.dailyBrief} />
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="min-w-0 space-y-3">
@@ -165,6 +168,7 @@ export function TodayView({
               })
             }
           />
+          <AiDailyPriority brief={data.dailyBrief} />
 
           <RevenueInReach revenue={data.revenue} />
 

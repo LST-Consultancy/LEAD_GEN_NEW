@@ -8,10 +8,13 @@ import {
   ChevronDown,
   ChevronRight,
   Info,
+  Loader2,
   Search,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
@@ -67,9 +70,35 @@ const ROLE_LABEL: Record<string, string> = {
   UNKNOWN: "unknown",
 };
 
+type PlanSection = { key: string; title: string; body: string };
+type PlanState =
+  | { accountId: string; status: "loading" }
+  | { accountId: string; status: "error"; reason: string }
+  | { accountId: string; status: "done"; sections: PlanSection[] };
+
 export function AccountsView({ accounts }: { accounts: Account[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [plan, setPlan] = useState<PlanState | null>(null);
+
+  async function generatePlan(accountId: string) {
+    setPlan({ accountId, status: "loading" });
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/plan`, { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) {
+        setPlan({
+          accountId,
+          status: "error",
+          reason: body.error?.message ?? "Couldn't generate a plan.",
+        });
+        return;
+      }
+      setPlan({ accountId, status: "done", sections: body.sections });
+    } catch {
+      setPlan({ accountId, status: "error", reason: "Couldn't reach the server." });
+    }
+  }
 
   const filtered = q
     ? accounts.filter((a) => a.name.toLowerCase().includes(q.toLowerCase()))
@@ -145,7 +174,10 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
               <CardHeader className="flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <button
                   type="button"
-                  onClick={() => setExpanded(expanded === a.id ? null : a.id)}
+                  onClick={() => {
+                    setExpanded(expanded === a.id ? null : a.id);
+                    setPlan(null);
+                  }}
                   className="flex min-w-0 items-start gap-2 text-left"
                   aria-expanded={expanded === a.id}
                 >
@@ -310,6 +342,49 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                   {a.technologies.length > 0 ? (
                     <p className="text-2xs text-muted">Runs: {a.technologies.join(", ")}</p>
                   ) : null}
+
+                  <div className="border-t border-border-subtle pt-2.5">
+                    {plan?.accountId !== a.id ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => generatePlan(a.id)}
+                        disabled={a.committee.length === 0 && a.openDeals.length === 0}
+                      >
+                        <Sparkles />
+                        Generate account plan
+                      </Button>
+                    ) : plan.status === "loading" ? (
+                      <p className="flex items-center gap-1.5 text-2xs text-muted">
+                        <Loader2 className="size-3 animate-spin" />
+                        Writing a plan from this account&apos;s committee, deals and signals…
+                      </p>
+                    ) : plan.status === "error" ? (
+                      <div className="flex flex-col items-start gap-1.5">
+                        <p className="text-2xs text-danger-text">{plan.reason}</p>
+                        <Button variant="secondary" size="sm" onClick={() => generatePlan(a.id)}>
+                          <Sparkles />
+                          Try again
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted">
+                          <Sparkles className="size-3 text-ai-accent" />
+                          Account plan
+                        </p>
+                        {plan.sections.map((s) => (
+                          <div key={s.key}>
+                            <p className="text-xs font-semibold text-primary">{s.title}</p>
+                            <p className="mt-0.5 text-xs leading-relaxed text-secondary">{s.body}</p>
+                          </div>
+                        ))}
+                        <Button variant="ghost" size="sm" onClick={() => generatePlan(a.id)}>
+                          Regenerate
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               ) : null}
             </Card>

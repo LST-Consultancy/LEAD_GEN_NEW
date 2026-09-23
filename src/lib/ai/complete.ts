@@ -331,6 +331,9 @@ const WIRED_FEATURES = [
   "summarise_thread",
   "proposal_draft",
   "coach_tip",
+  "daily_brief",
+  "account_plan",
+  "buyer_attribution",
 ] as const;
 
 export function modelPlan(): { feature: string; model: string; priced: boolean }[] {

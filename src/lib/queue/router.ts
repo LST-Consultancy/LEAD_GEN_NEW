@@ -10,7 +10,12 @@ import {
   purgeRecycleBin,
   rescoreWorklist,
 } from "@/lib/queue/handlers/maintenance";
-import { generateCoachTips, refreshNextBestActions, sweepNotifications } from "@/lib/queue/handlers/insights";
+import {
+  generateCoachTips,
+  generateDailyBriefs,
+  refreshNextBestActions,
+  sweepNotifications,
+} from "@/lib/queue/handlers/insights";
 import { deliverWebhook } from "@/lib/queue/handlers/webhooks";
 import {
   advanceSequences,
@@ -78,6 +83,9 @@ export async function runJob(name: JobName, data: Record<string, unknown>): Prom
 
     case JOB.GENERATE_COACH_TIPS:
       return generateCoachTips(workspaceId);
+
+    case JOB.GENERATE_DAILY_BRIEFS:
+      return generateDailyBriefs(workspaceId);
 
     default: {
       // Exhaustiveness: adding a job name without a handler is a type error.

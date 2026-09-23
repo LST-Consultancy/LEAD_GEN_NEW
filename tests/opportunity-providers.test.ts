@@ -20,11 +20,13 @@ describe("provider contracts using explicitly fictional HTTP fixtures",()=>{
 });
 
 describe("expanded discovery adapters", () => {
- it("searches public LinkedIn posts without requiring company domains or inventing a buyer/date", async () => {
-   request.mockResolvedValue({ web: { results: [{ title: "Fictional buyer seeks NetSuite partner", url: "https://www.linkedin.com/posts/fictional-example", description: "Looking for a NetSuite implementation partner", page_age: "2026-09-23T00:00:00Z" }] } });
+ it("sends buyer-phrased queries, never the LinkedIn site: query that search indexes cannot answer", async () => {
+   request.mockResolvedValue({ web: { results: [{ title: "Fictional buyer seeks NetSuite partner", url: "https://www.linkedin.com/posts/fictional-example", description: "Looking for a NetSuite implementation partner", page_age: "2026-09-23T00:00:00Z", profile: { name: "LinkedIn" } }] } });
    const rows = await discoveryProvider("workspace", "brave", { boards: [] }, "test-key").search(query);
-   expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ kind: "LINKEDIN_PUBLIC_POST", company: { name: "" }, postedAt: null });
-   expect(request.mock.calls.some(c => new URL(c[2]).searchParams.get("q")?.includes("site:linkedin.com/posts/"))).toBe(true);
+   expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ kind: "LINKEDIN_PUBLIC_POST", company: { name: "" }, postedAt: null, rawSourceReference: { siteName: "LinkedIn" } });
+   const sent = request.mock.calls.map(c => new URL(c[2]).searchParams.get("q") ?? "");
+   expect(sent.some(q => q.includes("site:linkedin.com"))).toBe(false);
+   expect(sent[0]).toContain('"looking for"');
  });
  it("reads Ashby listed jobs only and preserves supplied dates", async () => {
    request.mockResolvedValue({ jobs: [{ title: "NetSuite developer", jobUrl: "https://jobs.ashbyhq.com/fictional/1", descriptionPlain: "We are hiring", publishedAt: "2026-09-22T00:00:00Z", isListed: true }, { title: "Hidden", jobUrl: "https://jobs.ashbyhq.com/fictional/2", isListed: false }] });

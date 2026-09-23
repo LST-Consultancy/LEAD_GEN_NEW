@@ -100,6 +100,40 @@ export const LEAD_STATUS: Record<
   UNQUALIFIED: { label: "Unqualified", variant: "outline" },
 };
 
+export const DISCOVERY_STATE: Record<
+  string,
+  { label: string; variant: "neutral" | "info" | "success" | "warning" | "danger" }
+> = {
+  QUEUED: { label: "Queued", variant: "neutral" },
+  RUNNING: { label: "Searching", variant: "info" },
+  COMPLETED: { label: "Completed", variant: "success" },
+  PARTIAL: { label: "Partly completed", variant: "warning" },
+  FAILED: { label: "Failed", variant: "danger" },
+  CANCELLED: { label: "Cancelled", variant: "neutral" },
+};
+
+export const PROVIDER_RESULT_LABEL: Record<string, string> = {
+  COMPLETED: "Completed",
+  PARTIAL: "Partial",
+  ERROR: "Error",
+  NOT_CONNECTED: "Not connected",
+};
+
+/** Why a search result without a named buyer was set aside, as a plural noun phrase. */
+export const SCREEN_REASON_LABEL: Record<string, string> = {
+  seller_or_publisher: "seller or publisher pages",
+  not_a_request: "not a project request",
+  hiring_only: "job adverts, not a request for a provider",
+  no_named_buyer: "no buyer named",
+  not_relevant: "off topic",
+  ai_unavailable: "not checked: AI unavailable",
+};
+
+export const BUYER_ATTRIBUTION_LABEL: Record<string, string> = {
+  page_owner: "Buyer is the owner of the page making the request.",
+  named_in_text: "Buyer named in the source text; the name and quote were checked word for word. The company's identity is not otherwise verified.",
+};
+
 export const CHANNEL_LABEL: Record<string, string> = {
   EMAIL: "Email",
   WHATSAPP: "WhatsApp",

@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { formatInrCompact } from "@/lib/format";
 import { generateCoachTip } from "@/lib/ai/coach";
+import { generateDailyBrief } from "@/lib/ai/daily-brief";
 
 const DAY = 86_400_000;
 
@@ -370,6 +371,30 @@ export async function generateCoachTips(workspaceId: string) {
 
   for (const { userId } of members) {
     const result = await generateCoachTip(workspaceId, userId);
+    if (result.ok && result.created) created++;
+    else if (result.ok) skipped++;
+    else failed++;
+  }
+
+  return { workspaceId, membersConsidered: members.length, created, skipped, failed };
+}
+
+/**
+ * §6 — one "start here" daily brief per rep, from the same counted facts the
+ * deterministic Copilot brief already shows them.
+ */
+export async function generateDailyBriefs(workspaceId: string) {
+  const members = await db.workspaceMember.findMany({
+    where: { workspaceId, deletedAt: null },
+    select: { userId: true },
+  });
+
+  let created = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const { userId } of members) {
+    const result = await generateDailyBrief(workspaceId, userId);
     if (result.ok && result.created) created++;
     else if (result.ok) skipped++;
     else failed++;

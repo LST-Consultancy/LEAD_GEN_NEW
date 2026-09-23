@@ -10,7 +10,8 @@ export interface OpportunitySourceProvider {
   getCapabilities(): ProviderCapabilities;
 }
 export const PROVIDERS = [
-  { id: "brave", name: "Brave Public Web", kind: "PUBLIC_WEB", implemented: true, key: true, description: "Commercial search API. Storage requires a licence permitting retention. Searches the open web and indexed public LinkedIn posts. Unresolved buyers go to the discovery review inbox." },
+  { id: "brave", name: "Brave Public Web", kind: "PUBLIC_WEB", implemented: true, key: true, description: "Commercial search API. Storage requires a licence permitting retention. Searches the open web with buyer-phrased queries. A result is kept only when a buyer can be named: the page owner making its own request, or an organisation named in the text and checked word for word. Search indexes do not reach LinkedIn posts." },
+  { id: "linkedin_posts", name: "LinkedIn posts (via Apify)", kind: "LINKEDIN", implemented: true, key: true, description: "Searches public LinkedIn posts through a third-party Apify scraper (apimaestro/linkedin-posts-search-scraper-no-cookies) with your Apify API token. This is not a LinkedIn API: scraping is against LinkedIn's User Agreement, and enabling it means your workspace accepts that risk. Apify bills your account for each post returned. A post is kept only when its text or its author's headline names the buyer organisation." },
   { id: "greenhouse", name: "Greenhouse", kind: "JOB_BOARD", implemented: true, key: false, description: "Public Job Board API for explicitly configured company boards. Posting dates may be unavailable." },
   { id: "lever", name: "Lever", kind: "JOB_BOARD", implemented: true, key: false, description: "Public postings API for explicitly configured company boards." },
   { id: "ashby", name: "Ashby", kind: "JOB_BOARD", implemented: true, key: false, description: "Public job postings from configured Ashby company boards." },
@@ -25,7 +26,7 @@ export const PROVIDERS = [
 ] as const;
 export type ProviderId = typeof PROVIDERS[number]["id"];
 
-export const DISCOVERY_PROVIDERS = ["brave", "greenhouse", "lever", "ashby", "adzuna"] as const;
+export const DISCOVERY_PROVIDERS = ["brave", "linkedin_posts", "greenhouse", "lever", "ashby", "adzuna"] as const;
 
 export class PartialDiscoveryError extends Error {
   constructor(message: string, public readonly documents: SourceDocument[]) { super(message); }

@@ -15,7 +15,7 @@ export async function enrichOpportunity(ctx: AuthContext, id: string, verify = f
   assertPermission(ctx, PERMISSIONS.LEADS_REVEAL);
   const opportunity = await getOpportunity(ctx, id);
   const connections = await db.providerConnection.findMany({ where: { workspaceId: ctx.workspaceId, provider: { in: verify ? ["hunter"] : ["hunter", "signalhire"] }, enabled: true, allowedEnrichment: true, allowedStorage: true } });
-  const connection = connections.find(c => c.provider === "hunter" && opportunity.company.domain) ?? connections.find(c => c.provider === "signalhire") ?? connections[0];
+  let connection = connections.find(c => c.provider === "hunter" && opportunity.company.domain) ?? connections.find(c => c.provider === "signalhire") ?? connections[0];
   if (!connection?.enabled || !connection.allowedEnrichment || !connection.allowedStorage || !connection.encryptedCredentials) throw new MutationError("Connect Hunter or SignalHire with enrichment and storage permissions first (Hunter is required for verification). Nothing was charged.", "not_connected", 422);
   if (!verify && connection.provider === "hunter" && !opportunity.company.domain) throw new MutationError("A verified company domain is needed before contact discovery.", "domain_required", 422);
   const provider = hunterProvider(ctx.workspaceId, decryptCredential(connection.encryptedCredentials, ctx.workspaceId, connection.provider));
@@ -29,7 +29,12 @@ export async function enrichOpportunity(ctx: AuthContext, id: string, verify = f
         await db.contactMethod.update({ where: { id: contact.id, workspaceId: ctx.workspaceId }, data: { verificationResult: result.status, status: result.status === "VALID" ? "VERIFIED" : result.status === "INVALID" ? "FAILED" : "UNVERIFIED", confidence: result.confidence, verifiedAt: new Date(), provenance: { provider: "hunter", operation: "email-verifier", retrievedAt: new Date().toISOString(), status: result.status, allowedExport: connection.allowedExport } } }); count++;
       }
     } else {
-      const contacts = connection.provider === "signalhire" ? await signalHireProvider(ctx.workspaceId, decryptCredential(connection.encryptedCredentials!, ctx.workspaceId, "signalhire")).findPerson(opportunity.company.name, opportunity.company.domain) : await provider.findPerson(opportunity.company.domain!);
+      let contacts = connection.provider === "signalhire" ? await signalHireProvider(ctx.workspaceId, decryptCredential(connection.encryptedCredentials!, ctx.workspaceId, "signalhire")).findPerson(opportunity.company.name, opportunity.company.domain) : await provider.findPerson(opportunity.company.domain!);
+      const fallback = connections.find(c => c.provider === "signalhire" && c.encryptedCredentials);
+      if (!contacts.length && connection.provider === "hunter" && fallback) {
+        contacts = await signalHireProvider(ctx.workspaceId, decryptCredential(fallback.encryptedCredentials!, ctx.workspaceId, "signalhire")).findPerson(opportunity.company.name, opportunity.company.domain);
+        connection = fallback;
+      }
       for (const contact of contacts) {
         if (!contact.firstName || !contact.lastName || !contact.title || !/CTO|CIO|CFO|COO|founder|head|director|VP|procurement|administrator/i.test(contact.title)) continue;
         const suppressed = await db.suppression.findFirst({ where: { workspaceId: ctx.workspaceId, value: { equals: contact.email, mode: "insensitive" } } });

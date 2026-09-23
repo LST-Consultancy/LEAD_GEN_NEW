@@ -12,7 +12,9 @@
 import "dotenv/config";
 import { Worker, type Job } from "bullmq";
 import { getRedis, isQueueConfigured } from "@/lib/queue/connection";
-import { QUEUE_NAME, JOB_LABEL, type JobName } from "@/lib/queue/jobs";
+import { QUEUE_NAME, JOB, JOB_LABEL, type JobName, type JobPayload } from "@/lib/queue/jobs";
+import { judgeSearchJob } from "@/lib/opportunities/search-status";
+import { failOpportunitySearch } from "@/lib/services/opportunity-ingestion";
 import { installSchedules } from "@/lib/queue/producer";
 import { runJob } from "@/lib/queue/router";
 import { db } from "@/lib/db";
@@ -95,7 +97,7 @@ async function main() {
     }
   );
 
-  worker.on("failed", (job, err) => {
+  worker.on("failed", async (job, err) => {
     const exhausted = job && job.attemptsMade >= (job.opts.attempts ?? 1);
     if (exhausted) {
       log("error", "job exhausted its retries", {
@@ -104,6 +106,13 @@ async function main() {
         label: job ? JOB_LABEL[job.name as JobName] : undefined,
         error: err.message,
       });
+      // Otherwise the search row says QUEUED forever to anyone not watching the status screen.
+      if (job.name === JOB.OPPORTUNITY_DISCOVERY) {
+        const { workspaceId, searchId } = job.data as JobPayload<typeof JOB.OPPORTUNITY_DISCOVERY>;
+        const verdict = judgeSearchJob({ state: "failed", reason: err.message, attempts: job.attemptsMade }, new Date(job.timestamp), new Date());
+        try { if (verdict && "fail" in verdict) await failOpportunitySearch(workspaceId, searchId, verdict.fail); }
+        catch (e) { log("error", "could not mark search failed", { searchId, error: (e as Error).message }); }
+      }
     }
   });
 
