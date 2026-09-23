@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { ZodError } from "zod";
+import { log } from "@/lib/observability/log";
+import { REQUEST_ID_HEADER } from "@/lib/observability/request-id";
 import { ForbiddenError } from "@/lib/auth/context";
 import { InsufficientPointsError } from "@/lib/services/points";
 import { MutationError } from "@/lib/services/mutate";
 
 export type ApiErrorBody = {
-  error: { code: string; message: string; details?: unknown };
+  error: { code: string; message: string; details?: unknown; requestId?: string };
 };
+
+/**
+ * The id middleware attached to this request.
+ *
+ * Read lazily and defensively: `headers()` throws outside a request scope, and
+ * an error response is the last place that should itself throw.
+ */
+async function currentRequestId(): Promise<string | undefined> {
+  try {
+    return (await headers()).get(REQUEST_ID_HEADER) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * §127 — API errors carry a machine code and a sentence a person can act on.
@@ -16,9 +33,10 @@ export function apiError(
   code: string,
   message: string,
   status: number,
-  details?: unknown
+  details?: unknown,
+  requestId?: string
 ): NextResponse<ApiErrorBody> {
-  return NextResponse.json({ error: { code, message, details } }, { status });
+  return NextResponse.json({ error: { code, message, details, requestId } }, { status });
 }
 
 export function unauthorized() {
@@ -44,7 +62,7 @@ export function notFound(what = "That record") {
 }
 
 /** Maps known error types to honest responses; anything else becomes a 500. */
-export function handleApiError(err: unknown): NextResponse<ApiErrorBody> {
+export async function handleApiError(err: unknown): Promise<NextResponse<ApiErrorBody>> {
   if (err instanceof ZodError) {
     return apiError("invalid_request", "Some of those values weren't valid.", 400, err.flatten());
   }
@@ -68,10 +86,20 @@ export function handleApiError(err: unknown): NextResponse<ApiErrorBody> {
       { required: err.required, available: err.available }
     );
   }
-  console.error("[api] unhandled error", err);
+  // The only branch that is genuinely a fault rather than a refusal, so it is
+  // the only one logged at error level — and the only one that shows the id,
+  // because it is the only one worth reporting.
+  const requestId = await currentRequestId();
+  log.api.error("unhandled error", { err, requestId });
   return apiError(
     "internal_error",
-    "Something went wrong on our side. Nothing was changed and no points were charged.",
-    500
+    // The id is in the sentence because this is the one failure a person is
+    // expected to report, and "it broke around four o'clock" is not findable.
+    `Something went wrong on our side. Nothing was changed and no points were charged.${
+      requestId ? ` Quote reference ${requestId} if you report this.` : ""
+    }`,
+    500,
+    undefined,
+    requestId
   );
 }

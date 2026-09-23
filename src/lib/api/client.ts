@@ -13,7 +13,15 @@ export class ApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly status: number,
-    public readonly details?: unknown
+    public readonly details?: unknown,
+    /**
+     * The server's id for this request, taken from the response header.
+     *
+     * Carried so an error surface can show something a person can quote. A
+     * support report that says "it failed this afternoon" cannot be looked up;
+     * one that quotes this lands on a single log line.
+     */
+    public readonly requestId?: string
   ) {
     super(message);
     this.name = "ApiError";
@@ -55,7 +63,10 @@ async function request<T>(
       err?.message ?? "Something went wrong. Nothing was changed.",
       err?.code ?? "unknown_error",
       res.status,
-      err?.details
+      err?.details,
+      // Prefer the header: it is set for every response, including the ones
+      // that never reached a route handler.
+      res.headers.get("x-request-id") ?? err?.requestId
     );
   }
 

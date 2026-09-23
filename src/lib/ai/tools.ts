@@ -6,6 +6,7 @@ import { formatInrCompact, formatAge } from "@/lib/format";
 import { getRevenueInReach, getSalesHealth, getWorklist } from "@/lib/services/today";
 import { z } from "zod";
 import { createNote, createNoteSchema } from "@/lib/services/notes";
+import { draftOutreach, draftInputSchema } from "@/lib/services/draft";
 import { createTask, createTaskSchema } from "@/lib/services/tasks";
 import { updateDeal, updateDealSchema } from "@/lib/services/deal-mutations";
 import { revealContacts, quoteReveal } from "@/lib/services/lead-mutations";
@@ -16,9 +17,9 @@ import { formatInr } from "@/lib/format";
  * with a declared risk class. Answers are assembled from returned rows, so
  * every sentence the Copilot says has a row behind it.
  *
- * Only READ tools are wired up so far. WRITE, SPEND and EXTERNAL tools are
- * declared here with `implemented: false` so the surface is honest about what
- * it can and cannot do.
+ * A tool that is declared but not yet built carries `implemented: false`, so
+ * every surface that offers one can say which it is rather than failing at the
+ * moment someone tries.
  */
 
 export type RiskClass = "READ" | "WRITE" | "SPEND" | "EXTERNAL";
@@ -396,9 +397,34 @@ export const TOOLS: Tool[] = [
   {
     name: "draft_outreach",
     riskClass: "WRITE",
-    description: "Draft an email, WhatsApp or LinkedIn message.",
+    description:
+      "Draft an email, WhatsApp or LinkedIn message, grounded on the knowledge base and the lead's own rows. Drafting is not sending — nothing is transmitted or queued.",
     match: [/draft/i, /write.*(email|message)/i, /compose/i],
-    implemented: false,
+    implemented: true,
+    input: draftInputSchema,
+    leadIdOf: (input) => (input as { leadId?: string }).leadId,
+    execute: async (ctx, input) => {
+      const result = await draftOutreach(ctx, input as z.input<typeof draftInputSchema>);
+      if (!result.ok) {
+        // A refusal is the tool working. Reported as text rather than thrown so
+        // the agent runner records it as an action with an honest outcome,
+        // rather than as a crash.
+        return { text: result.reason, evidence: [] };
+      }
+      return {
+        text: result.subject ? `${result.subject}\n\n${result.body}` : result.body,
+        evidence: [
+          {
+            label: `Drafted for ${result.channel}`,
+            detail: result.groundedOn.length
+              ? `Grounded on ${result.groundedOn.join(", ")}`
+              : "No grounding was cited",
+            href: `/leads/${(input as { leadId: string }).leadId}`,
+          },
+          ...(result.withheld ? [{ label: "Held back", detail: result.withheld }] : []),
+        ],
+      };
+    },
   },
   {
     name: "send_email",

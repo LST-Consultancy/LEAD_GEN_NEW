@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { formatInrCompact } from "@/lib/format";
+import { log } from "@/lib/observability/log";
 
 const DAY = 86_400_000;
 
@@ -248,13 +249,13 @@ export async function purgeRecycleBin(workspaceId: string) {
           break;
         default:
           // An unknown type is left in place rather than guessed at.
-          console.warn(`[purge] unhandled objectType ${record.objectType}, skipping`);
+          log.queue.warn("purge skipped an unhandled objectType", { objectType: record.objectType });
           continue;
       }
       await db.deletedRecord.delete({ where: { id: record.id } });
     } catch (err) {
       // A foreign key may still reference the row; leave it for the next run.
-      console.error(`[purge] could not remove ${record.objectType} ${record.objectId}:`, err);
+      log.queue.error("purge could not remove a record", { objectType: record.objectType, objectId: record.objectId, err });
     }
   }
 

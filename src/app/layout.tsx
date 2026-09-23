@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import "./globals.css";
@@ -38,7 +39,11 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Forwarded by middleware. Reading it here makes the layout dynamic, which is
+  // required anyway: a per-request nonce cannot be baked into a static page.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html lang="en-IN" suppressHydrationWarning>
       <body className={`${inter.variable} ${mono.variable} antialiased`}>
@@ -48,7 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to main content
         </a>
-        <Providers>{children}</Providers>
+        <Providers nonce={nonce}>{children}</Providers>
       </body>
     </html>
   );

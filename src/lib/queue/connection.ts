@@ -1,5 +1,6 @@
 import "server-only";
 import IORedis, { type Redis } from "ioredis";
+import { log } from "@/lib/observability/log";
 
 /**
  * Redis connection, shared by the queue producer and the worker.
@@ -31,7 +32,7 @@ export function getRedis(): Redis | null {
   client.on("error", (err) => {
     // Logged once per failure rather than thrown: a queue outage must not take
     // request handling down with it.
-    console.error("[queue] redis error:", err.message);
+    log.queue.error("redis error", { message: err.message });
   });
 
   globalForRedis.redis = client;

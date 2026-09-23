@@ -124,8 +124,11 @@ export function SupportView({
             </span>
           </div>
           <p className="text-2xs leading-relaxed text-secondary">
-            Include the workspace slug <span className="font-mono text-primary">{workspaceSlug}</span>
-            , what you expected, what happened, and the time. The{" "}
+            Include the workspace slug <span className="font-mono text-primary">{workspaceSlug}</span>{" "}
+            and, if the app showed you a reference, that reference. Every request
+            carries an id, and an error that quotes one can be found on a single log line —
+            &ldquo;it broke this afternoon&rdquo; cannot. Otherwise: what you expected, what
+            happened, and roughly when. The{" "}
             <Link
               href="/settings/audit"
               className="text-brand-text underline-offset-2 hover:underline"

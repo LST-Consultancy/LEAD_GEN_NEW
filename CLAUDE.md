@@ -253,6 +253,14 @@ are sanitised because BullMQ reserves `:`.
 npm run typecheck && npm run lint && npm run test && npm run build
 ```
 
+`npm run e2e` runs Playwright against a real browser and the seeded database.
+It signs in for real, so two runs inside five minutes trip the product's own
+sign-in limiter — that is the limiter working, not the suite breaking. Specs
+reuse one session via the `setup` project; only `auth.spec.ts` drives the login
+form, because that is what it tests. Nothing in the suite accepts a seeded
+proposal: accepting is irreversible, and a test that cannot run twice is not a
+test.
+
 Then look at it: desktop and mobile width, light and dark, with data and empty.
 `npm run build` while `npm run dev` is running will invalidate the dev server's
 chunks — restart it afterwards. It can also make the *build* fail with
@@ -260,6 +268,17 @@ chunks — restart it afterwards. It can also make the *build* fail with
 before believing that one.
 
 ## Gotchas
+
+- **A CSP nonce has to reach third-party inline scripts yourself.** Next stamps
+  its own inline scripts with the nonce from the request's CSP header, but not
+  ones a library renders. `next-themes` emits a theme-setting script before
+  first paint; it takes a `nonce` prop, threaded from middleware through the
+  root layout. Anything else that renders an inline script needs the same, and
+  `e2e/csp.spec.ts` is what catches it.
+- **`waitForLoadState("networkidle")` never settles on the data-heavy screens.**
+  Today, Leads and Pipeline keep a connection open, so a test waiting on it
+  times out instead of asserting. Wait for the app shell and a short settle.
+
 
 - **Prisma 7** requires a driver adapter (`@prisma/adapter-pg`) and reads the
   datasource URL from `prisma.config.ts`, not `.env` implicitly. The generated

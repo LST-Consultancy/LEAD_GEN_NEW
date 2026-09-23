@@ -144,7 +144,7 @@ export async function answerQuestion(
       feature: "natural_language_analytics",
       system: SYSTEM,
       prompt: `CONTEXT (read from the database just now):\n\n${context}\n\nQUESTION: ${question}`,
-      maxTokens: 400,
+      maxTokens: 2000,
       timeoutMs: 20_000,
     }
   );

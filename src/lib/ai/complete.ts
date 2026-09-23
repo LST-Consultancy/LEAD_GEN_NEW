@@ -60,6 +60,8 @@ export type CompletionResult =
         | "rate_limited"
         | "auth_failed"
         | "provider_error"
+        | "truncated"
+        | "timed_out"
         | "empty_response";
       latencyMs: number;
     };
@@ -81,11 +83,37 @@ export async function complete(
     };
   }
 
+  const budgetMs = req.timeoutMs ?? 30_000;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), req.timeoutMs ?? 30_000);
+  const timeout = setTimeout(() => controller.abort(), budgetMs);
 
   try {
-    const result = await callProvider(provider, model, req, controller.signal);
+    /*
+     * Raced against a timer rather than relying on the abort alone.
+     *
+     * Aborting a `fetch` signals intent; it does not guarantee the promise
+     * settles promptly. Measured here: a request with the signal aborted at 25
+     * seconds only rejected after 603, because the abort could not tear the
+     * socket down until the response finally arrived. Every caller had been
+     * told this call was bounded, and a page awaiting it hung for ten minutes.
+     *
+     * The race releases the caller on time whatever the socket does. The abort
+     * is still fired, so the request is abandoned rather than left running.
+     */
+    const result = await Promise.race([
+      callProvider(provider, model, req, controller.signal),
+      new Promise<ProviderOutcome>((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              ok: false,
+              code: "timed_out",
+              reason: `The model did not answer within ${Math.round(budgetMs / 1000)} seconds, so the request was abandoned. Nothing was generated.`,
+            }),
+          budgetMs
+        )
+      ),
+    ]);
     clearTimeout(timeout);
     const latencyMs = Date.now() - started;
 
@@ -140,7 +168,13 @@ type ProviderOutcome =
   | { ok: true; text: string; inputTokens: number; outputTokens: number }
   | {
       ok: false;
-      code: "rate_limited" | "auth_failed" | "provider_error" | "empty_response";
+      code:
+        | "rate_limited"
+        | "auth_failed"
+        | "provider_error"
+        | "truncated"
+        | "timed_out"
+        | "empty_response";
       reason: string;
     };
 
@@ -171,7 +205,9 @@ async function callProvider(
     // is enforced by the system prompt rather than by a sampling knob.
     body: JSON.stringify({
       model,
-      max_tokens: req.maxTokens ?? 1024,
+      // Generous, because thinking tokens are drawn from the same budget:
+      // a limit sized for the answer alone yields an empty reply.
+      max_tokens: req.maxTokens ?? 4096,
       system: req.system,
       messages: [{ role: "user", content: req.prompt }],
     }),
@@ -203,9 +239,13 @@ async function callProvider(
 
   const json = (await response.json()) as {
     content?: { type: string; text?: string }[];
+    stop_reason?: string;
     usage?: { input_tokens?: number; output_tokens?: number };
   };
 
+  // These models emit a `thinking` block before the answer, and its tokens
+  // count against `max_tokens`. Only `text` blocks are the reply; joining
+  // everything would put the model's reasoning in front of the user.
   const text = (json.content ?? [])
     .filter((c) => c.type === "text")
     .map((c) => c.text ?? "")
@@ -213,6 +253,18 @@ async function callProvider(
     .trim();
 
   if (text.length === 0) {
+    // Ran out of budget before producing any answer, almost always because
+    // thinking consumed it. That is a different fault from a model that
+    // answered with nothing, and it has a different fix — raise `maxTokens` —
+    // so it is reported separately rather than as a generic empty reply.
+    if (json.stop_reason === "max_tokens") {
+      return {
+        ok: false,
+        code: "truncated",
+        reason:
+          "The reply was cut off before any of it came back, so nothing usable was produced. Nothing was saved.",
+      };
+    }
     return {
       ok: false,
       code: "empty_response",
@@ -270,10 +322,11 @@ async function log(
  * that no code path reaches.
  */
 const WIRED_FEATURES = [
-  // Only the Copilot reaches complete() today. Adding a name here without a
-  // call site would put a model-backed feature on the settings screen that
-  // nothing can actually run, so `wired-features.test.ts` scans for the call.
+  // Adding a name here without a call site would put a model-backed feature on
+  // the settings screen that nothing can actually run, so
+  // `wired-features.test.ts` scans the source for the call.
   "natural_language_analytics",
+  "draft_outreach",
 ] as const;
 
 export function modelPlan(): { feature: string; model: string; priced: boolean }[] {

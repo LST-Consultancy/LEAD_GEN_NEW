@@ -479,22 +479,86 @@ property that is easy to get subtly wrong:
   this app does not carry, so the key is entered manually and the screen says
   so.
 
+**End-to-end tests** run in a real browser via Playwright (`npm run e2e`), and
+cover the three things unit tests structurally cannot: that sign-in works
+through the actual form, that the CSRF middleware accepts the app's own writes
+while refusing forged ones, and that a prospect with only a link — no account,
+no cookie, a separate browser context — can open a proposal and is stopped from
+accepting one anonymously.
+
+They sign in for real, so they run inside the product's own rate limit rather
+than around it: one shared session via a setup project, and `auth.spec.ts`
+driving the form because it is what it tests. Two runs inside five minutes will
+hit the limiter, which is the limiter working. Nothing in the suite accepts a
+seeded proposal — accepting is irreversible, and a test that cannot run twice is
+not a test.
+
+**Logging is structured and correlated.** Middleware mints an id per request,
+forwards it to the route, echoes it on every response and includes it in the
+sentence shown when something genuinely fails — so a support report can quote
+something findable instead of a time of day. An inbound id is reused where it
+looks safe, so hops correlate, and rejected otherwise: the value is echoed into
+a response header and into log lines, and a newline in it would let a caller
+forge entries. Fields are redacted by key before serialisation rather than at
+each call site, because a logger handed arbitrary objects is eventually handed a
+session token.
+
+What that is *not* is tracing or metrics. There are no spans, no percentiles,
+no alerting — a log collector would have correlated lines to read, and nothing
+is watching them for you.
+
+**A nonce-based CSP, and HSTS.** `script-src` carries a per-request nonce with
+`strict-dynamic` and never `unsafe-inline` — which would permit Next's inline
+scripts *and* anything an injection added, i.e. most of what a CSP is for.
+`style-src` does allow inline, deliberately and narrowly: Next and the chart
+components set `style` attributes, which carry no nonce, and a style injection
+can deface a page but cannot execute. `frame-ancestors`, `object-src`,
+`base-uri` and `form-action` are all locked down; `unsafe-eval` and the dev
+websocket are development-only. HSTS is sent only over real HTTPS, never from a
+dev server — pinning `localhost` would break every other project on the
+machine.
+
+A CSP is the one header that fails silently in somebody else's browser, so
+`e2e/csp.spec.ts` loads seven screens in Chromium and fails on any violation the
+browser reports, in both dev and production builds. It earned its keep
+immediately: `next-themes` renders its own inline theme script, which Next does
+not nonce, and the policy blocked it — the flash-of-white script, broken by the
+thing meant to protect it. The nonce is now threaded from middleware through the
+root layout into the provider.
+
 **Not done, and needed before real traffic:**
 
+- Metrics, tracing and alerting — logs are correlated, but nothing aggregates
+  or watches them
 - Real integrations: the provider interface, six adapters' requirements and every
   pre-send rule exist, but no delivery adapter is implemented, so nothing sends
 - Payment collection (GST is computed and shown on proposals, but nothing is invoiced or collected)
-- E2E tests; the suite is unit and integration only
 - Observability beyond structured logs
-- A Content-Security-Policy and HSTS, which have to be tuned to whichever
-  providers a deployment actually enables
+- Reviewing `connect-src` against whatever a deployment actually calls — the
+  policy allows `'self'` only, so an added analytics or error-reporting
+  endpoint needs listing
 
 `lib/nav.ts` carries every route's phase and, for a live screen, what is still
 withheld from it — the same list `/whats-new` renders.
 
-Four of the fourteen registry tools are still unbuilt — `research_company`,
-`draft_outreach`, `send_email` and `send_whatsapp` — and every screen that
-depends on one says so by name rather than degrading quietly.
+Three of the fourteen registry tools are still unbuilt — `research_company`,
+`send_email` and `send_whatsapp` — and every screen that depends on one says so
+by name rather than degrading quietly. All three need something external: a
+licensed data source, an ESP, a WhatsApp Business Account.
+
+**`draft_outreach` is built.** It grounds on two things and nothing else: the
+Knowledge Base, which bounds what may be claimed about what you sell, and the
+lead's own rows, which bound what may be claimed about them. With either
+missing it refuses rather than writing something generic — a generic first
+message spends the one impression available. The model writes `{{variables}}`
+rather than values, so a draft reviewed today still addresses the right person
+if the contact changes before it goes; a placeholder the renderer cannot fill
+is rejected outright rather than shipped with visible braces. Every draft
+reports what it *withheld* for lack of grounding, which in testing correctly
+declined to cite a case study marked as a demonstration reference and declined
+to pitch a service whose stated minimum volume the prospect had no record of
+meeting. Drafting is not sending: nothing is transmitted, queued, or marked
+contacted.
 
 ### Colour accessibility
 

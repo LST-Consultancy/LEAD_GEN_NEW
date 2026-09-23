@@ -8,6 +8,7 @@ import {
   type JobName,
   type JobPayload,
 } from "@/lib/queue/jobs";
+import { log } from "@/lib/observability/log";
 
 const globalForQueue = globalThis as unknown as { srQueue?: Queue | null };
 
@@ -108,7 +109,7 @@ export async function enqueue<N extends JobName>(
     // BullMQ returns the existing job when the id already exists.
     return { queued: true, jobId: String(job.id) };
   } catch (err) {
-    console.error(`[queue] failed to enqueue ${name}:`, err);
+    log.queue.error("failed to enqueue", { job: name, err });
     return {
       queued: false,
       reason: "error",
@@ -149,7 +150,7 @@ export async function installSchedules(workspaceIds: string[]): Promise<number> 
         );
         installed++;
       } catch (err) {
-        console.error(`[queue] failed to schedule ${name} for ${workspaceId}:`, err);
+        log.queue.error("failed to schedule", { job: name, workspaceId, err });
       }
     }
   }
@@ -185,7 +186,7 @@ export async function getQueueStats(): Promise<{
       })),
     };
   } catch (err) {
-    console.error("[queue] stats unavailable:", err);
+    log.queue.warn("stats unavailable", { err });
     return { configured: true, counts: null, repeatable: [] };
   }
 }
@@ -213,7 +214,7 @@ export async function getRecentJobs(limit = 40) {
       }))
       .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
   } catch (err) {
-    console.error("[queue] recent jobs unavailable:", err);
+    log.queue.warn("recent jobs unavailable", { err });
     return [];
   }
 }

@@ -33,7 +33,21 @@ function getQueryClient() {
   return browserQueryClient;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+  nonce,
+}: {
+  children: React.ReactNode;
+  /**
+   * The request's CSP nonce.
+   *
+   * `next-themes` renders its own inline script — the one that sets the theme
+   * before first paint so the page does not flash white. Next nonces the
+   * scripts *it* generates, not this one, so without this the policy blocks it
+   * and every visitor gets the flash the script exists to prevent.
+   */
+  nonce?: string;
+}) {
   const queryClient = getQueryClient();
 
   return (
@@ -43,6 +57,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       enableSystem
       disableTransitionOnChange
       storageKey="sr-theme"
+      nonce={nonce}
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={250} skipDelayDuration={300}>
