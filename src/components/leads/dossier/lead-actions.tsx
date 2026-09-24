@@ -27,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ApiError, leadsApi } from "@/lib/api/client";
+import { ApiError, leadsApi, dealsApi } from "@/lib/api/client";
 import { RevealButton } from "@/components/leads/reveal-button";
 import { LEAD_STATUS, type LeadStatusKey } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
@@ -410,6 +410,104 @@ export function ScoreOverrideDialog({
                 Save override
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/**
+ * Promotes a lead to a tracked deal. `valueInr` is the only thing the service
+ * can't default sensibly — everything else (pipeline, stage, owner) falls
+ * back server-side, so this asks for nothing more than that.
+ */
+export function CreateDealDialog({
+  leadId,
+  companyName,
+}: {
+  leadId: string;
+  companyName: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = React.useState(false);
+  const [title, setTitle] = React.useState("");
+  const [value, setValue] = React.useState("");
+  const [pending, setPending] = React.useState(false);
+
+  const parsed = Number(value);
+  const valid = value.trim() !== "" && Number.isFinite(parsed) && parsed >= 0;
+
+  async function create() {
+    setPending(true);
+    try {
+      await dealsApi.create({
+        leadId,
+        valueInr: parsed,
+        ...(title.trim() ? { title: title.trim() } : {}),
+      });
+      setOpen(false);
+      toast.success("Deal created", { description: "Now tracked on the pipeline board." });
+      router.refresh();
+    } catch (err) {
+      reportError("create that deal", err);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => {
+          setTitle("");
+          setValue("");
+          setOpen(true);
+        }}
+      >
+        Create a deal
+      </Button>
+
+      <Dialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create a deal for {companyName}</DialogTitle>
+            <DialogDescription>
+              Enters the default pipeline at its first stage. Move it from there on the pipeline
+              board.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-3">
+            <Field label="Estimated value (₹)" htmlFor="deal-value" required>
+              <Input
+                id="deal-value"
+                type="number"
+                min={0}
+                step={1000}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="500000"
+                autoFocus
+              />
+            </Field>
+            <Field label="Title" htmlFor="deal-title">
+              <Input
+                id="deal-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={`${companyName} — new opportunity`}
+              />
+            </Field>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" loading={pending} disabled={!valid} onClick={create}>
+              Create deal
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -101,7 +101,7 @@ export default async function LeadDossierPage({
           {/* Side column: actions, deals, work, account */}
           <div className="min-w-0 space-y-3">
             <NextBestActions actions={lead.nextBestActions} />
-            <DealsPanel deals={lead.deals} />
+            <DealsPanel leadId={lead.id} companyName={lead.company.name} deals={lead.deals} />
             <TasksAndNotes tasks={lead.tasks} notes={lead.notes} leadId={lead.id} />
             <RelationshipMemory memory={lead.person.memory} />
             <CompanyPanel

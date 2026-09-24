@@ -31,9 +31,10 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-opportunity-e2e/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-opportunity-e2e/types/**/*.ts"
+    ".next-opportunity-prod/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

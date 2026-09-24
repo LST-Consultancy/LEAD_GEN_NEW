@@ -23,7 +23,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/ui/states";
 import { formatAge, formatDate, formatInrCompact, isPast } from "@/lib/format";
-import { AddNote } from "@/components/leads/dossier/lead-actions";
+import { AddNote, CreateDealDialog } from "@/components/leads/dossier/lead-actions";
 import { TASK_PRIORITY } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
 
@@ -173,8 +173,12 @@ export function RelationshipMemory({
 
 /** Deals attached to this lead, with their risk flags. */
 export function DealsPanel({
+  leadId,
+  companyName,
   deals,
 }: {
+  leadId: string;
+  companyName: string;
   deals: {
     id: string;
     title: string;
@@ -208,11 +212,7 @@ export function DealsPanel({
             icon={GitBranch}
             title="No deal yet"
             description="Create a deal once there is a real opportunity to track. A lead without a deal costs nothing to keep."
-            action={
-              <Button size="sm" variant="secondary" onClick={() => toast("Deal creation lands with pipeline mutations")}>
-                Create a deal
-              </Button>
-            }
+            action={<CreateDealDialog leadId={leadId} companyName={companyName} />}
           />
         ) : (
           <ul className="space-y-2">
