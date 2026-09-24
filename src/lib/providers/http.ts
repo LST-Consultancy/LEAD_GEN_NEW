@@ -14,7 +14,7 @@ export function validateProviderUrl(raw: string) {
 }
 // Apify's own API allows far more than a search board does, and one LinkedIn page costs a start,
 // a poll or two and a dataset read, so the default 20/minute would stall a two-page search.
-const LIMITS: Record<string, [number, number][]> = { linkedin_posts: [[60, 60], [3600, 1000], [86400, 5000]] };
+const LIMITS: Record<string, [number, number][]> = { linkedin_posts: [[60, 60], [3600, 1000], [86400, 5000]], apify_enrichment: [[60, 60], [3600, 1000], [86400, 5000]] };
 const DEFAULT_LIMITS: [number, number][] = [[60, 20], [3600, 300], [86400, 1500]];
 export async function providerJson(workspaceId: string, provider: string, url: string, headers: Record<string, string> = {}, body?: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<unknown> {
   const timeoutMs = opts.timeoutMs ?? 15000;

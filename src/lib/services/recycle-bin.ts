@@ -46,6 +46,14 @@ const RESTORABLE: Record<string, { label: string; restore: (id: string) => Promi
       await db.playbook.update({ where: { id }, data: { deletedAt: null, isActive: false } });
     },
   },
+  PlanTemplate: {
+    label: "Plan template",
+    restore: async (id) => {
+      // Deleting took every version of the name, so restoring brings them all back.
+      const t = await db.planTemplate.findUniqueOrThrow({ where: { id }, select: { workspaceId: true, name: true } });
+      await db.planTemplate.updateMany({ where: { workspaceId: t.workspaceId, name: t.name }, data: { deletedAt: null } });
+    },
+  },
   Competitor: {
     label: "Competitor",
     restore: async (id) => {

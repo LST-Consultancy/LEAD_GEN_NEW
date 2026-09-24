@@ -27,15 +27,18 @@ const STATUS: [string, string][] = [["todo", "To do"], ["in_progress", "In progr
 const TONE: Record<string, "neutral" | "info" | "warning" | "success"> = { todo: "neutral", in_progress: "info", blocked: "warning", done: "success", skipped: "neutral" };
 const errorText = (err: unknown) => (err instanceof ApiError ? err.message : "Nothing was changed.");
 
-export function PlanView({ data, canEdit }: { data: Data; canEdit: boolean }) {
+type Template = { id: string; name: string; version: number; steps: number };
+
+export function PlanView({ data, canEdit, canConfigure = false, templates = [] }: { data: Data; canEdit: boolean; canConfigure?: boolean; templates?: Template[] }) {
   const router = useRouter();
   const [members, setMembers] = React.useState<Member[]>([]);
   const [starting, setStarting] = React.useState(false);
+  const [templateId, setTemplateId] = React.useState("");
   React.useEffect(() => { membersApi.list().then((r) => setMembers(r.members), () => setMembers([])); }, []);
 
   async function start() {
     setStarting(true);
-    try { await api.post(`/api/deals/${data.deal.id}/plan`, {}); toast.success("Plan started", { description: "Eleven steps across sales, delivery and cash. Edit them to fit the deal." }); router.refresh(); }
+    try { await api.post(`/api/deals/${data.deal.id}/plan`, templateId ? { templateId } : {}); toast.success("Plan started", { description: "Assign the steps and edit them to fit the deal." }); router.refresh(); }
     catch (err) { toast.error("Couldn't start the plan", { description: errorText(err) }); } finally { setStarting(false); }
   }
 
@@ -49,12 +52,21 @@ export function PlanView({ data, canEdit }: { data: Data; canEdit: boolean }) {
           <h1 className="truncate text-lg font-semibold text-primary">{data.deal.title}</h1>
           <p className="text-2xs text-muted"><Link href={`/accounts/${data.deal.company.id}`} className="hover:underline">{data.deal.company.name}</Link> · {formatInrCompact(data.deal.valueInr)} · {data.deal.status.toLowerCase()}{data.plan ? ` · ${done} of ${steps.length} done · ${data.plan.template}` : ""}</p>
         </div>
+        {data.plan && canConfigure ? <SaveTemplateButton dealId={data.deal.id} /> : null}
       </div>
 
       {!data.plan ? (
         <Card><CardContent className="space-y-2 py-5 text-sm">
           <p className="text-secondary">No plan for this deal yet. Starting one lays out eleven steps from discovery to payment — who owns each, what each depends on, and where the client has to approve.</p>
-          {canEdit ? <Button variant="primary" size="sm" loading={starting} onClick={() => void start()}>Start the plan</Button> : <p className="text-2xs text-muted">You need pipeline edit access to start one.</p>}
+          {canEdit ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <select aria-label="Start from" value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="h-8 rounded-md border border-border bg-surface px-2 text-xs">
+                <option value="">Standard plan (11 steps)</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.name} v{t.version} ({t.steps} steps)</option>)}
+              </select>
+              <Button variant="primary" size="sm" loading={starting} onClick={() => void start()}>Start the plan</Button>
+            </div>
+          ) : <p className="text-2xs text-muted">You need pipeline edit access to start one.</p>}
         </CardContent></Card>
       ) : (
         <div className="grid gap-3 lg:grid-cols-3">
@@ -196,6 +208,43 @@ function StepEditor({ dealId, phase, step, steps }: { dealId?: string; phase?: s
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
             <Button variant="primary" size="sm" loading={pending} disabled={title.trim().length < 2} onClick={() => void save()}>{step ? "Save" : "Add step"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** Saves the plan's steps (skipped ones left out) as a reusable template. */
+function SaveTemplateButton({ dealId }: { dealId: string }) {
+  const [open, setOpen] = React.useState(false);
+  const [name, setName] = React.useState("");
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState("");
+  async function save() {
+    setPending(true); setError("");
+    try {
+      const r = await api.post<{ name: string; version: number; steps: number }>(`/api/deals/${dealId}/plan/template`, { name: name.trim() });
+      toast.success(`Saved as ${r.name} v${r.version}`, { description: `${r.steps} steps. New plans can start from it; this plan is unchanged.` });
+      setOpen(false); setName("");
+    } catch (err) { setError(errorText(err)); } finally { setPending(false); }
+  }
+  return (
+    <>
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>Save as template</Button>
+      <Dialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Save as a template</DialogTitle>
+            <DialogDescription>Keeps the steps, what each waits on and where the client approves. Skipped steps are left out. Using a name again saves a new version.</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-2">
+            <Field label="Template name" htmlFor="tpl-name"><Input id="tpl-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="NetSuite implementation" /></Field>
+            {error ? <p className="text-xs text-danger-text">{error}</p> : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={pending} disabled={name.trim().length < 3} onClick={() => void save()}>Save template</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -64,6 +64,8 @@ not chosen, and they pass in all-pairs mode in both themes.
 | A LinkedIn query, depth preset or date mapping | `lib/opportunities/linkedin-plan.ts` — pure, shared by the search screen and the worker |
 | A rule that sets a LinkedIn post aside | `lib/opportunities/linkedin-qualify.ts`, with one reason in `DISCOVERY_REASON` |
 | LinkedIn pagination and stopping | `lib/opportunities/linkedin-run.ts` — pure; I/O is injected |
+| Running any Apify Actor | `lib/providers/apify.ts` — start, record, poll, page the dataset |
+| An enrichment rule (identity, people, emails, checks) | `lib/enrichment/*` — pure; the runner is `lib/services/enrichment-runner.ts` |
 
 Prisma `Decimal` and `Date` must not cross into components. Convert once at the
 service boundary with `toPlain()` from `lib/serialize.ts`.
@@ -315,6 +317,17 @@ before believing that one.
 - **One post, one outcome.** The LinkedIn funnel reconciles only because every
   unique post gets exactly one label (`qualified_*`, `review:*`, `rejected:*`).
   A new rule must return a reason, not add a second count.
+- **A name is not a company.** Enrichment resolves a company only with corroborating evidence and
+  a clear lead over the runner-up; otherwise it asks. A person's choice is `confirmedBy` and no
+  automated result may overwrite it (`applyCompanyFields`).
+- **A mail server's answer has seven meanings.** Syntax or MX passing is not a confirmed mailbox,
+  a catch-all proves nothing, and a refused SMTP probe is inconclusive, not invalid.
+  `lib/enrichment/verification.ts`; only `MAILBOX_CONFIRMED` sets ContactMethod `VERIFIED`.
+- **info@ belongs to the company.** Role addresses go to `CompanyContactPoint` and are never given
+  to a person; an address is given to a person only when it contains their name.
+- **BullMQ counts workers server-wide.** `getWorkers` reads Redis's client list, which spans every
+  logical database, so a live worker on db 0 shows as "1 worker" for the test queue on db 15. Do not
+  assert the no-worker notice in integration tests while a worker runs on the machine.
 - **Unknown is not a match.** A post that does not state company size, location
   or industry goes to review (or is rejected under strict filters), and a
   reviewer's qualification records those fields as still unknown.

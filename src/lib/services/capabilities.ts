@@ -21,11 +21,13 @@ export type Capability = { operation: Operation; state: CapabilityState; provide
 
 const OPERATIONS: Record<Operation, { providers: string[]; needs: ("allowedSearch" | "allowedEnrichment" | "allowedStorage")[]; label: string; whereToUse: string; unbuilt?: string }> = {
   opportunity_discovery: { providers: ["brave", "linkedin_posts", "greenhouse", "lever", "ashby", "adzuna"], needs: ["allowedSearch", "allowedStorage"], label: "Opportunity discovery", whereToUse: "Find Opportunities" },
-  contact_enrichment: { providers: ["hunter", "signalhire"], needs: ["allowedEnrichment", "allowedStorage"], label: "Finding people at a company", whereToUse: "Find people on an opportunity" },
-  email_verification: { providers: ["hunter"], needs: ["allowedEnrichment", "allowedStorage"], label: "Email verification", whereToUse: "Verify emails on an opportunity" },
+  // Apify enrichment is listed first: it is the workflow on the opportunity screen. Hunter and
+  // SignalHire stay available to API callers of the older routes, and are never used silently.
+  contact_enrichment: { providers: ["apify_enrichment", "hunter", "signalhire"], needs: ["allowedEnrichment", "allowedStorage"], label: "Finding people and emails at a company", whereToUse: "Find people and Find emails on an opportunity" },
+  email_verification: { providers: ["apify_enrichment", "hunter"], needs: ["allowedEnrichment", "allowedStorage"], label: "Email checks", whereToUse: "Check emails on an opportunity" },
   phrase_watching: { providers: [], needs: [], label: "Search-phrase watching", whereToUse: "", unbuilt: "Search phrases are not fetched by any connected provider yet. To watch for new demand, save a watch on Find Opportunities — those run on your connected sources." },
   person_lookup: { providers: [], needs: [], label: "Standalone person lookup", whereToUse: "", unbuilt: "Looking up someone who is not already in this workspace is not built. Find people at a company from one of its opportunities instead." },
-  company_research: { providers: [], needs: [], label: "External company research", whereToUse: "", unbuilt: "Research from outside sources (funding, news, hiring) is not built. Opportunity research summarises the evidence already collected." },
+  company_research: { providers: ["apify_enrichment"], needs: ["allowedEnrichment", "allowedStorage"], label: "Company research (identity, website, LinkedIn page, profile)", whereToUse: "Research company on an opportunity" },
 };
 
 export async function getCapabilities(ctx: AuthContext): Promise<Record<Operation, Capability>> {
@@ -37,8 +39,10 @@ export async function getCapabilities(ctx: AuthContext): Promise<Record<Operatio
       const descriptor = PROVIDERS.find((p) => p.id === id);
       const row = rows.find((r) => r.provider === id);
       if (!descriptor?.implemented || !row) return [];
+      // Apify enrichment may use the token saved on the LinkedIn posts connection: the same Apify account.
+      const hasKey = Boolean(row.encryptedCredentials) || (id === "apify_enrichment" && Boolean(rows.find((r) => r.provider === "linkedin_posts")?.encryptedCredentials));
       const state: ProviderReadiness["state"] = !row.enabled ? "disabled"
-        : descriptor.key && !row.encryptedCredentials ? "missing_credentials"
+        : descriptor.key && !hasKey ? "missing_credentials"
         : spec.needs.some((n) => !row[n]) ? "missing_permission"
         : row.status === "CONNECTED" ? "healthy" : row.status === "ERROR" ? "failing" : "untested";
       return [{ id, name: descriptor.name, state }];

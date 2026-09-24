@@ -21,7 +21,8 @@ describe("provider capability registry", () => {
     expect(caps.opportunity_discovery.state).toBe("not_connected");
     expect(caps.phrase_watching.state).toBe("not_built");
     expect(caps.person_lookup.state).toBe("not_built");
-    expect(caps.company_research.state).toBe("not_built");
+    // Built since the Apify enrichment work: unconnected, not unbuilt.
+    expect(caps.company_research.state).toBe("not_connected");
   });
 
   it("distinguishes tested, untested, failing, disabled and unlicensed connections", async () => {

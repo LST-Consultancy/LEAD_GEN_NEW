@@ -3,13 +3,20 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
-import { Workflow } from "lucide-react";
+import { Trash2, Workflow } from "lucide-react";
+import * as React from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ApiError, api } from "@/lib/api/client";
 
 type Row = { dealId: string; dealTitle: string; company: string; dealStatus: string; done: number; total: number; blocked: number; next: { title: string; phase: string } | null };
 type Candidate = { id: string; title: string; company: string; status: string };
 
 /** Deal plans in progress, and deals that could have one. */
-export function PlansList({ plans, candidates }: { plans: Row[]; candidates: Candidate[] }) {
+type Template = { id: string; name: string; version: number; steps: number };
+
+export function PlansList({ plans, candidates, templates = [], canConfigure = false }: { plans: Row[]; candidates: Candidate[]; templates?: Template[]; canConfigure?: boolean }) {
   return (
     <div className="space-y-3">
       <Card>
@@ -38,6 +45,26 @@ export function PlansList({ plans, candidates }: { plans: Row[]; candidates: Can
           )}
         </CardContent>
       </Card>
+      {templates.length ? (
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Your templates</CardTitle>
+              <p className="mt-0.5 text-2xs text-muted">Saved from plans with &ldquo;Save as template&rdquo;. Removing one does not change plans already started from it.</p>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <ul className="divide-y divide-border-subtle">
+              {templates.map((t) => (
+                <li key={t.id} className="flex items-center gap-2 px-4 py-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-primary">{t.name} <span className="text-muted">v{t.version} · {t.steps} steps</span></span>
+                  {canConfigure ? <RemoveTemplateButton id={t.id} name={t.name} /> : null}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
       {candidates.length ? (
         <Card>
           <CardHeader><CardTitle>Deals without a plan</CardTitle></CardHeader>
@@ -57,4 +84,15 @@ export function PlansList({ plans, candidates }: { plans: Row[]; candidates: Can
       ) : null}
     </div>
   );
+}
+
+function RemoveTemplateButton({ id, name }: { id: string; name: string }) {
+  const router = useRouter();
+  const [pending, setPending] = React.useState(false);
+  async function remove() {
+    setPending(true);
+    try { await api.del(`/api/plan-templates/${id}`); toast.success(`${name} removed`, { description: "In the recycle bin if you need it back. Existing plans are unchanged." }); router.refresh(); }
+    catch (err) { toast.error("Not removed", { description: err instanceof ApiError ? err.message : "Nothing was changed." }); } finally { setPending(false); }
+  }
+  return <Button variant="ghost" size="xs" aria-label={`Remove template ${name}`} loading={pending} onClick={() => void remove()}><Trash2 /></Button>;
 }

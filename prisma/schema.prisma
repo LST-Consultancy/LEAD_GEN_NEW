@@ -593,6 +593,9 @@ model Company {
   intentScore       Int       @default(0)
   intentScoreReason Json      @default("{}")
   lastSignalAt      DateTime?
+  /// Per-field provenance for enriched values: { field: { source, actor, runId, retrievedAt, confidence, confirmedBy? } },
+  /// plus `_stages` freshness markers. A confirmed field is never overwritten by a weaker source.
+  enrichment        Json      @default("{}")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
@@ -605,6 +608,7 @@ model Company {
   deals         Deal[]
   committee     CommitteeMember[]
   research      ResearchReport[]
+  contactPoints CompanyContactPoint[]
   notes         Note[]
   tasks         Task[]
   activities    Activity[]
@@ -628,6 +632,8 @@ model Person {
   lastName    String?
   headline    String?
   linkedinUrl String?
+  /// A stable identifier from the source profile (LinkedIn public id), used before any name matching.
+  profileKey  String?
   avatarUrl   String?
   city        String?
   state       String?
@@ -648,6 +654,7 @@ model Person {
 
   @@index([workspaceId, deletedAt])
   @@index([workspaceId, linkedinUrl])
+  @@index([workspaceId, profileKey])
   @@index([fullName])
 }
 
@@ -661,6 +668,11 @@ model Employment {
   seniority       String?
   isDecisionMaker Boolean   @default(false)
   isCurrent       Boolean   @default(true)
+  /// current, former or uncertain — how sure the source is that this person works here.
+  association     String    @default("current")
+  /// Where the association and title came from, and why the person is relevant.
+  evidence        Json      @default("{}")
+  source          String?
   startedAt       DateTime?
   endedAt         DateTime?
   createdAt       DateTime  @default(now())
@@ -2450,4 +2462,80 @@ model PlanTemplate {
 
   @@unique([workspaceId, name, version])
   @@index([workspaceId, deletedAt])
+}
+
+/// A company-level address or number (info@, sales@, a switchboard). Never assigned to a person.
+model CompanyContactPoint {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @db.Uuid
+  companyId          String    @db.Uuid
+  kind               String
+  value              String
+  /// A role address (info@, sales@) rather than one that names a person.
+  isGeneric          Boolean   @default(true)
+  source             String
+  evidence           Json      @default("{}")
+  verificationResult String    @default("UNCHECKED")
+  verification       Json      @default("{}")
+  verifiedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  company            Company   @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, companyId, value])
+  @@index([workspaceId, companyId])
+}
+
+/// One press of Research / Find people / Find emails / Check emails / Enrich, with each stage's outcome.
+model EnrichmentRun {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  opportunityId     String    @db.Uuid
+  companyId         String    @db.Uuid
+  requestedById     String?   @db.Uuid
+  /// research, people, emails, verify or enrich
+  kind              String
+  trigger           String    @default("manual")
+  /// QUEUED, RUNNING, COMPLETED, NO_MATCHES, PARTIAL, NEEDS_SELECTION, FAILED, CANCELLED
+  state             String    @default("QUEUED")
+  refresh           Boolean   @default(false)
+  stages            Json      @default("[]")
+  result            Json      @default("{}")
+  budgetUsd         Float
+  spentUsd          Float     @default(0)
+  estimatedUsd      Float     @default(0)
+  error             String?
+  jobKey            String?
+  cancelRequestedAt DateTime?
+  createdAt         DateTime  @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  apifyRuns         ApifyRun[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, opportunityId, createdAt])
+  @@index([workspaceId, state])
+}
+
+/// Every chargeable Apify run, recorded before waiting on it, so a retry reads the same run instead of paying again.
+model ApifyRun {
+  id              String         @id @default(uuid()) @db.Uuid
+  workspaceId     String         @db.Uuid
+  enrichmentRunId String?        @db.Uuid
+  stageKey        String
+  actorId         String
+  inputHash       String
+  input           Json
+  runId           String?
+  datasetId       String?
+  status          String         @default("STARTING")
+  itemCount       Int            @default(0)
+  usageUsd        Float?
+  estimatedUsd    Float          @default(0)
+  startedAt       DateTime       @default(now())
+  finishedAt      DateTime?
+  enrichmentRun   EnrichmentRun? @relation(fields: [workspaceId, enrichmentRunId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, enrichmentRunId, stageKey])
+  @@index([workspaceId, actorId, inputHash])
 }

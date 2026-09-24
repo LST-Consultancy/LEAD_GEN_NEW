@@ -53,3 +53,6 @@ playwright-report/
 
 # Isolated Next.js validation artifacts
 /.next-opportunity-*/
+
+# local run logs
+/logs/

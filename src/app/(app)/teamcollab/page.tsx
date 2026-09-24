@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth/context";
 import { listStickyNotes } from "@/lib/services/teamcollab";
-import { dealsWithoutPlan, listDealPlans } from "@/lib/services/deal-plans";
+import { dealsWithoutPlan, listDealPlans, listPlanTemplates } from "@/lib/services/deal-plans";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { TeamCollabView } from "@/components/admin/teamcollab-view";
 import { PlansList } from "@/components/plans/plans-list";
 import { cn } from "@/lib/utils";
@@ -25,7 +26,7 @@ export default async function TeamCollabPage({ searchParams }: { searchParams: P
         ))}
       </nav>
       {tab === "plans"
-        ? <PlansList plans={await listDealPlans(ctx)} candidates={await dealsWithoutPlan(ctx)} />
+        ? <PlansList plans={await listDealPlans(ctx)} candidates={await dealsWithoutPlan(ctx)} templates={await listPlanTemplates(ctx)} canConfigure={ctx.permissions.includes(PERMISSIONS.PIPELINE_CONFIGURE)} />
         : <TeamCollabView notes={await listStickyNotes(ctx)} />}
     </div>
   );

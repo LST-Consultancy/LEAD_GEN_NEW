@@ -64,7 +64,9 @@ test("fictional search result opens persisted evidence, dates and contact status
     await expect(page.locator("#main").getByRole("heading",{name:"Evidence and intent score"})).toBeVisible({ timeout: 60000 });
     await expect(page.getByText("Fictional test evidence: explicit implementation requirement",{exact:false})).toBeVisible();
     await expect(page.getByText("Fictional Browser Buyer · CTO")).toBeVisible();
-    await expect(page.getByText(/buyer@fictional-browser.invalid · UNKNOWN/)).toBeVisible();
+    // Verification is shown in words ("Unknown"), not as the raw stored code.
+    await expect(page.getByText("buyer@fictional-browser.invalid", { exact: false })).toBeVisible();
+    await expect(page.getByText(/· Unknown ·/)).toBeVisible();
     await expect(page.getByRole("link",{name:/View original evidence/})).toHaveAttribute("href","https://fictional-browser.invalid/requirement");
     await page.screenshot({path:"/tmp/signalroom-opportunity-detail.png",fullPage:true});
   } finally {

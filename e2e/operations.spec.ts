@@ -25,6 +25,16 @@ test("a deal plan starts, enforces dependencies, and records progress", async ({
     await expect(page.getByText("Step updated")).toBeVisible();
   }
   await expect(page.getByLabel("Status of Discovery call")).toHaveValue("done");
+
+  const tpl = `E2E template ${randomUUID().slice(0, 6)}`;
+  await page.getByRole("button", { name: "Save as template" }).click();
+  await page.getByLabel("Template name").fill(tpl);
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(page.getByText(`Saved as ${tpl} v1`)).toBeVisible();
+  await page.goto("/teamcollab");
+  await expect(page.getByText(tpl)).toBeVisible();
+  await page.getByRole("button", { name: `Remove template ${tpl}` }).click();
+  await expect(page.getByText(`${tpl} removed`)).toBeVisible();
 });
 
 test("a competitor can be tracked, edited and removed", async ({ page }) => {

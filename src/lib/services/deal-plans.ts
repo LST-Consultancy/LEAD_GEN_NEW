@@ -8,7 +8,7 @@ import { toPlain } from "@/lib/serialize";
 import { STANDARD_PLAN, STEP_STATUS, hasCycle, waitingOn } from "@/lib/plans/template";
 import { randomBytes } from "node:crypto";
 import { toPaise, toRupees } from "@/lib/proposals/money";
-import { MutationError, loadScoped, mutate } from "./mutate";
+import { MutationError, loadScoped, mutate, softDelete } from "./mutate";
 
 /**
  * Deal plans: who does what, in what order, across sales, delivery and cash.
@@ -24,21 +24,73 @@ async function scopedDeal(ctx: AuthContext, dealId: string) {
   return loadScoped(() => db.deal.findFirst({ where: { id: dealId, workspaceId: ctx.workspaceId, deletedAt: null, ...dealVisibilityFilter(ctx) }, select: { id: true, title: true, status: true, leadId: true, companyId: true, ownerId: true } }), "That deal");
 }
 
-export async function startDealPlan(ctx: AuthContext, dealId: string) {
+type TemplateStepRow = { key: string; phase: string; title: string; completionCriteria: string | null; dependsOn: string[]; isClientGate: boolean };
+const templateStepSchema = z.object({ key: z.string(), phase: z.enum(["sales", "delivery", "cash"]), title: z.string(), completionCriteria: z.string().nullable(), dependsOn: z.array(z.string()), isClientGate: z.boolean() });
+
+/** The steps a plan starts from: the standard template, or one of the workspace's own. */
+async function templateSteps(ctx: AuthContext, templateId?: string): Promise<{ key: string; version: number; label: string; steps: TemplateStepRow[] }> {
+  if (!templateId) {
+    return {
+      key: STANDARD_PLAN.key, version: STANDARD_PLAN.version, label: "standard",
+      steps: STANDARD_PLAN.steps.map((s) => ({ key: s.key, phase: s.phase, title: s.title, completionCriteria: s.completionCriteria, dependsOn: [...s.dependsOn], isClientGate: "isClientGate" in s ? Boolean(s.isClientGate) : false })),
+    };
+  }
+  const t = await loadScoped(() => db.planTemplate.findFirst({ where: { id: templateId, workspaceId: ctx.workspaceId, deletedAt: null } }), "That template");
+  const steps = z.array(templateStepSchema).safeParse(t.steps);
+  if (!steps.success || steps.data.length === 0) throw new MutationError("That template's steps can't be read. Save it again from a plan.", "bad_template", 422);
+  return { key: t.id, version: t.version, label: `${t.name} v${t.version}`, steps: steps.data };
+}
+
+export async function startDealPlan(ctx: AuthContext, dealId: string, templateId?: string) {
   const deal = await scopedDeal(ctx, dealId);
   const existing = await db.dealPlan.findUnique({ where: { dealId }, select: { id: true } });
   if (existing) return { planId: existing.id, created: false };
+  const template = await templateSteps(ctx, templateId);
   return mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
     const plan = await db.dealPlan.create({
       data: {
-        workspaceId: ctx.workspaceId, dealId, templateKey: STANDARD_PLAN.key, templateVersion: STANDARD_PLAN.version, createdById: ctx.userId,
-        steps: { create: STANDARD_PLAN.steps.map((s, i) => ({ workspaceId: ctx.workspaceId, key: s.key, order: i + 1, phase: s.phase, title: s.title, completionCriteria: s.completionCriteria, dependsOn: [...s.dependsOn], isClientGate: "isClientGate" in s ? s.isClientGate : false, ownerId: deal.ownerId })) },
+        workspaceId: ctx.workspaceId, dealId, templateKey: template.key, templateVersion: template.version, createdById: ctx.userId,
+        steps: { create: template.steps.map((s, i) => ({ workspaceId: ctx.workspaceId, key: s.key, order: i + 1, phase: s.phase, title: s.title, completionCriteria: s.completionCriteria, dependsOn: s.dependsOn, isClientGate: s.isClientGate, ownerId: deal.ownerId })) },
       },
     });
     return {
       result: { planId: plan.id, created: true },
-      log: { action: "deal.plan_started", objectType: "Deal", objectId: dealId, after: { template: `${STANDARD_PLAN.key}@${STANDARD_PLAN.version}`, steps: STANDARD_PLAN.steps.length }, activity: { kind: "deal.plan_started", summary: `Plan started for ${deal.title}`, dealId, leadId: deal.leadId ?? undefined, companyId: deal.companyId } },
+      log: { action: "deal.plan_started", objectType: "Deal", objectId: dealId, after: { template: template.label, steps: template.steps.length }, activity: { kind: "deal.plan_started", summary: `Plan started for ${deal.title} (${template.label})`, dealId, leadId: deal.leadId ?? undefined, companyId: deal.companyId } },
     };
+  });
+}
+
+/** Saves this deal's current steps as a workspace template. Same name → next version. */
+export async function savePlanAsTemplate(ctx: AuthContext, dealId: string, rawName: string) {
+  const name = z.string().trim().min(3, "Give the template a name of at least three characters.").max(80).parse(rawName);
+  await scopedDeal(ctx, dealId);
+  const plan = await loadScoped(() => db.dealPlan.findFirst({ where: { dealId, workspaceId: ctx.workspaceId }, include: { steps: { orderBy: { order: "asc" } } } }), "That plan");
+  // Skipped steps are what this deal did not need; they are not part of the method.
+  const steps = plan.steps.filter((x) => x.status !== "skipped");
+  const kept = new Set(steps.map((x) => x.key));
+  const snapshot: TemplateStepRow[] = steps.map((x) => ({ key: x.key, phase: x.phase, title: x.title, completionCriteria: x.completionCriteria, dependsOn: x.dependsOn.filter((d) => kept.has(d)), isClientGate: x.isClientGate }));
+  const latest = await db.planTemplate.findFirst({ where: { workspaceId: ctx.workspaceId, name: { equals: name, mode: "insensitive" } }, orderBy: { version: "desc" }, select: { version: true, name: true } });
+  return mutate(ctx, PERMISSIONS.PIPELINE_CONFIGURE, async () => {
+    const t = await db.planTemplate.create({ data: { workspaceId: ctx.workspaceId, name: latest?.name ?? name, version: (latest?.version ?? 0) + 1, steps: snapshot as never, createdById: ctx.userId } });
+    return { result: { id: t.id, name: t.name, version: t.version, steps: snapshot.length }, log: { action: "plan_template.saved", objectType: "PlanTemplate", objectId: t.id, after: { name: t.name, version: t.version, steps: snapshot.length } } };
+  });
+}
+
+/** Latest version of each template name, plus the standard one. */
+export async function listPlanTemplates(ctx: AuthContext) {
+  const rows = await db.planTemplate.findMany({ where: { workspaceId: ctx.workspaceId, deletedAt: null }, orderBy: [{ name: "asc" }, { version: "desc" }], select: { id: true, name: true, version: true, steps: true, createdAt: true } });
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) if (!latest.has(r.name.toLowerCase())) latest.set(r.name.toLowerCase(), r);
+  return [...latest.values()].map((r) => ({ id: r.id, name: r.name, version: r.version, steps: Array.isArray(r.steps) ? r.steps.length : 0, createdAt: r.createdAt.toISOString() }));
+}
+
+export async function deletePlanTemplate(ctx: AuthContext, id: string) {
+  const t = await loadScoped(() => db.planTemplate.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } }), "That template");
+  return mutate(ctx, PERMISSIONS.PIPELINE_CONFIGURE, async () => {
+    // Every version of the name goes; plans already started keep their steps.
+    await db.planTemplate.updateMany({ where: { workspaceId: ctx.workspaceId, name: t.name, deletedAt: null }, data: { deletedAt: new Date() } });
+    await softDelete(ctx, { objectType: "PlanTemplate", objectId: id, label: t.name });
+    return { result: { id }, log: { action: "plan_template.deleted", objectType: "PlanTemplate", objectId: id, before: { name: t.name } } };
   });
 }
 
@@ -57,7 +109,7 @@ export async function getDealPlan(ctx: AuthContext, dealId: string) {
     money: moneySummary,
     deal: toPlain(deal),
     plan: {
-      id: plan.id, template: `${plan.templateKey} v${plan.templateVersion}`,
+      id: plan.id, template: plan.templateKey === STANDARD_PLAN.key ? `standard v${plan.templateVersion}` : `${(await db.planTemplate.findFirst({ where: { id: plan.templateKey }, select: { name: true } }))?.name ?? "saved template"} v${plan.templateVersion}`,
       steps: plan.steps.map((s) => ({
         id: s.id, key: s.key, order: s.order, phase: s.phase, title: s.title, completionCriteria: s.completionCriteria, dependsOn: s.dependsOn,
         isClientGate: s.isClientGate, status: s.status, owner: owners.find((o) => o.id === s.ownerId) ?? null, artifact: s.artifact, note: s.note,

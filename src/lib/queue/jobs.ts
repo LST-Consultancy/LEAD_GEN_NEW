@@ -13,6 +13,7 @@ export const JOB = {
   OPPORTUNITY_ACTION: "opportunity.action",
   OPPORTUNITY_DISCOVERY: "opportunity.discovery",
   OPPORTUNITY_WATCHES: "opportunity.watches",
+  OPPORTUNITY_ENRICHMENT: "opportunity.enrichment",
   /** Re-runs the scoring engine over a workspace's leads. */
   RESCORE_WORKSPACE: "rescore.workspace",
   /** Re-runs the scoring engine for one lead, e.g. after a new signal. */
@@ -59,6 +60,7 @@ export type JobPayloads = {
   [JOB.OPPORTUNITY_ACTION]: { workspaceId: string; userId: string; opportunityId: string; syncId: string; operation: "enrich" | "verify" | "research" };
   [JOB.OPPORTUNITY_DISCOVERY]: { workspaceId: string; searchId: string };
   [JOB.OPPORTUNITY_WATCHES]: { workspaceId: string };
+  [JOB.OPPORTUNITY_ENRICHMENT]: { workspaceId: string; runId: string };
   [JOB.RESCORE_WORKSPACE]: { workspaceId: string; reason?: string };
   [JOB.RESCORE_LEAD]: { workspaceId: string; leadId: string; reason?: string };
   [JOB.DETECT_DEAL_RISKS]: { workspaceId: string };
@@ -88,6 +90,8 @@ export const JOB_POLICY: Record<
   [JOB.OPPORTUNITY_ACTION]: { attempts: 2, backoffMs: 10000, timeoutMs: 300000 },
   [JOB.OPPORTUNITY_DISCOVERY]: { attempts: 3, backoffMs: 10000, timeoutMs: 900000 },
   [JOB.OPPORTUNITY_WATCHES]: { attempts: 3, backoffMs: 10000, timeoutMs: 120000 },
+  // A redelivery resumes at the first unfinished stage and re-reads recorded Apify runs, so retrying is not re-buying.
+  [JOB.OPPORTUNITY_ENRICHMENT]: { attempts: 2, backoffMs: 15000, timeoutMs: 1500000 },
   [JOB.RESCORE_WORKSPACE]: { attempts: 3, backoffMs: 5_000, timeoutMs: 300_000 },
   [JOB.RESCORE_LEAD]: { attempts: 3, backoffMs: 2_000, timeoutMs: 30_000 },
   [JOB.DETECT_DEAL_RISKS]: { attempts: 3, backoffMs: 5_000, timeoutMs: 120_000 },
@@ -197,6 +201,7 @@ export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: fals
     [JOB.OPPORTUNITY_ACTION]: { allowed: false, because: "Requested after reviewing an opportunity." },
     [JOB.OPPORTUNITY_DISCOVERY]: { allowed: false, because: "Started from Find Opportunities." },
     [JOB.OPPORTUNITY_WATCHES]: { allowed: true },
+    [JOB.OPPORTUNITY_ENRICHMENT]: { allowed: false, because: "Started from an opportunity's Research, Find people, Find emails, Check emails or Enrich buttons." },
     [JOB.RESCORE_WORKSPACE]: { allowed: true },
     [JOB.DETECT_DEAL_RISKS]: { allowed: true },
     [JOB.RESCORE_WORKLIST]: { allowed: true },
@@ -238,6 +243,7 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.OPPORTUNITY_ACTION]: "Enrich or research opportunity",
   [JOB.OPPORTUNITY_DISCOVERY]: "Discover opportunities",
   [JOB.OPPORTUNITY_WATCHES]: "Refresh opportunity watches",
+  [JOB.OPPORTUNITY_ENRICHMENT]: "Enrich an opportunity",
   [JOB.RESCORE_WORKSPACE]: "Rescore all leads",
   [JOB.RESCORE_LEAD]: "Rescore one lead",
   [JOB.DETECT_DEAL_RISKS]: "Detect deal risks",

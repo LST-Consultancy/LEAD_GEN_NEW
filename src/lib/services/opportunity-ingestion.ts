@@ -215,5 +215,7 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
       }
     }
   });
+  // Optional and off by default; bounded by its own per-day cap. Never allowed to fail discovery.
+  if (qualified && state !== "CANCELLED") await import("./enrichment").then(m => m.autoEnrichAfterDiscovery(workspaceId, searchId)).catch(() => null);
   return { state, found, qualified };
 }
