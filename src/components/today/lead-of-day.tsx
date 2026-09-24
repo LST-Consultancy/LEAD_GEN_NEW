@@ -8,12 +8,10 @@ import {
   Clock,
   ExternalLink,
   FileText,
-  Lock,
   Mail,
   MessageCircle,
   Phone,
   Sparkles,
-  Star,
   Unlock,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
@@ -26,6 +24,8 @@ import { IntentBadge, ScoreDial, TierBadge } from "@/components/domain/indicator
 import { formatAge, formatInrCompact, hoursSince } from "@/lib/format";
 import { SIGNAL_SOURCE_LABEL, SIGNAL_TYPE_LABEL, type IntentKey, type TierKey } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
+import { RevealButton } from "@/components/leads/reveal-button";
+import { StarToggle } from "@/components/leads/dossier/lead-actions";
 
 type LeadOfDay = {
   id: string;
@@ -71,7 +71,13 @@ type LeadOfDay = {
 
 /** §7 — the one lead the system would open first, with the reason attached. */
 export function LeadOfTheDay({ lead }: { lead: LeadOfDay | null }) {
-  const [dismissed, setDismissed] = React.useState(false);
+  // Dismissal is a personal, per-day preference, so it lives in this browser for the rest of the day.
+  // The key is built only in effects and handlers: reading the clock during render risks a hydration mismatch.
+  const leadId = lead?.id ?? "none";
+  const dismissKey = React.useCallback(() => `sr-lod-dismissed:${leadId}:${new Date().toDateString()}`, [leadId]);
+  const [dismissed, setDismissedState] = React.useState(false);
+  React.useEffect(() => { try { setDismissedState(localStorage.getItem(dismissKey()) === "1"); } catch { /* storage unavailable */ } }, [dismissKey]);
+  const setDismissed = (value: boolean) => { setDismissedState(value); try { if (value) localStorage.setItem(dismissKey(), "1"); else localStorage.removeItem(dismissKey()); } catch { /* storage unavailable */ } };
 
   if (!lead) {
     return (
@@ -245,9 +251,9 @@ export function LeadOfTheDay({ lead }: { lead: LeadOfDay | null }) {
           <Link href={`/leads/${lead.id}`}>Open dossier</Link>
         </Button>
 
-        <ChannelButton state={lead.channels.email} icon={Mail} label="Email" />
-        <ChannelButton state={lead.channels.phone} icon={Phone} label="Call" />
-        <ChannelButton state={lead.channels.phone} icon={MessageCircle} label="WhatsApp" />
+        <ChannelButton leadId={lead.id} mode="email" state={lead.channels.email} icon={Mail} label="Email" />
+        <ChannelButton leadId={lead.id} mode="call" state={lead.channels.phone} icon={Phone} label="Call" />
+        <ChannelButton leadId={lead.id} mode="whatsapp" state={lead.channels.phone} icon={MessageCircle} label="WhatsApp" />
 
         {lead.person.linkedinUrl ? (
           <Tooltip content="Open their LinkedIn profile in a new tab">
@@ -262,16 +268,12 @@ export function LeadOfTheDay({ lead }: { lead: LeadOfDay | null }) {
         <div className="ml-auto flex items-center gap-1">
           <Tooltip content="Add to a proposal">
             <Button variant="ghost" size="icon-sm" aria-label="Create proposal" asChild>
-              <Link href={`/proposals?lead=${lead.id}`}>
+              <Link href={`/proposals/new?leadId=${lead.id}`}>
                 <FileText />
               </Link>
             </Button>
           </Tooltip>
-          <Tooltip content={lead.isStarred ? "Starred" : "Star this lead"}>
-            <Button variant="ghost" size="icon-sm" aria-label="Star lead">
-              <Star className={cn(lead.isStarred && "fill-warning text-warning")} />
-            </Button>
-          </Tooltip>
+          <StarToggle leadId={lead.id} initial={lead.isStarred} />
           <Button
             variant="ghost"
             size="sm"
@@ -315,10 +317,14 @@ function Fact({
  * A locked channel says so rather than failing silently when clicked (§126).
  */
 function ChannelButton({
+  leadId,
+  mode,
   state,
   icon: Icon,
   label,
 }: {
+  leadId: string;
+  mode: "email" | "call" | "whatsapp";
   state: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -333,37 +339,15 @@ function ChannelButton({
     );
   }
   if (state === "locked") {
-    return (
-      <Tooltip content={`${label} is available but locked. Revealing verified contacts costs 1 point.`}>
-        <Button
-          variant="subtle"
-          size="sm"
-          onClick={() =>
-            toast("Reveal not wired up yet", {
-              description:
-                "The point ledger and reveal flow exist, but this button isn't connected. Nothing was charged.",
-            })
-          }
-        >
-          <Lock />
-          {label}
-        </Button>
-      </Tooltip>
-    );
+    return <RevealButton leadId={leadId} lockedCount={1} variant="subtle" label={label} />;
   }
   return (
     <Tooltip content={`${label} — contact already revealed, no points needed`}>
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() =>
-          toast(`${label} composer not built yet`, {
-            description: "Outreach lands in Phase 4. The contact is revealed and ready.",
-          })
-        }
-      >
-        <Unlock className="size-3" />
-        {label}
+      <Button variant="secondary" size="sm" asChild>
+        <Link href={`/leads/${leadId}?do=${mode}`}>
+          <Unlock className="size-3" />
+          {label}
+        </Link>
       </Button>
     </Tooltip>
   );

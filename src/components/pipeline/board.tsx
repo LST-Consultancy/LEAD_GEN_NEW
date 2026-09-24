@@ -18,6 +18,7 @@ import { useDroppable, useDraggable } from "@dnd-kit/core";
 import { restrictToWindowEdges } from "@dnd-kit/modifiers";
 import { AlertTriangle, Info, Sparkles } from "lucide-react";
 import { DealCard, type Deal } from "@/components/pipeline/deal-card";
+import { DealEditDialog, EditDealContext } from "@/components/pipeline/deal-edit-dialog";
 import { Metric } from "@/components/charts/metric";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,10 +68,12 @@ export function PipelineBoard({
   columns: initialColumns,
   totals,
   pipelineName,
+  cash,
 }: {
   columns: Column[];
   totals: Totals;
   pipelineName: string;
+  cash?: { wonDeals: number; wonInr: number; invoicedInr: number; collectedInr: number; outstandingInr: number; unbilledInr: number; overdueDeals: number };
 }) {
   const router = useRouter();
   const [columns, setColumns] = React.useState(initialColumns);
@@ -80,6 +83,7 @@ export function PipelineBoard({
   );
   const [lostReason, setLostReason] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
 
   // Server data wins whenever it arrives, so a refresh reconciles any drift.
   React.useEffect(() => setColumns(initialColumns), [initialColumns]);
@@ -91,6 +95,9 @@ export function PipelineBoard({
 
   const allDeals = React.useMemo(() => columns.flatMap((c) => c.deals), [columns]);
   const activeDeal = allDeals.find((d) => d.id === activeId) ?? null;
+  const editingDeal = allDeals.find((d) => d.id === editingId) ?? null;
+  const wonStage = columns.find((c) => c.isWon);
+  const lostStage = columns.find((c) => c.isLost);
 
   function recompute(cols: Column[]): Column[] {
     return cols.map((c) => {
@@ -203,6 +210,7 @@ export function PipelineBoard({
   }
 
   return (
+    <EditDealContext.Provider value={setEditingId}>
     <div className="flex h-full min-h-0 flex-col">
       {/* Header metrics */}
       <div className="shrink-0 border-b border-border bg-surface px-3 py-2.5 sm:px-4">
@@ -243,6 +251,13 @@ export function PipelineBoard({
             />
           </div>
         </div>
+        {cash && cash.wonDeals > 0 ? (
+          <p className="mt-1.5 text-2xs text-muted tabular">
+            After the win, across {cash.wonDeals} won {cash.wonDeals === 1 ? "deal" : "deals"}: {formatInrCompact(cash.invoicedInr)} invoiced · {formatInrCompact(cash.collectedInr)} collected ·{" "}
+            <span className={cash.outstandingInr > 0 ? "text-warning-text" : undefined}>{formatInrCompact(cash.outstandingInr)} outstanding</span> · {formatInrCompact(cash.unbilledInr)} not yet invoiced
+            {cash.overdueDeals > 0 ? <span className="text-danger-text"> · {cash.overdueDeals} with an overdue invoice</span> : null}
+          </p>
+        ) : null}
       </div>
 
       {/* Board */}
@@ -346,7 +361,19 @@ export function PipelineBoard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {editingDeal ? (
+        <DealEditDialog
+          deal={editingDeal}
+          canMarkWon={Boolean(wonStage)}
+          canMarkLost={Boolean(lostStage)}
+          onClose={() => setEditingId(null)}
+          onMarkWon={() => { setEditingId(null); if (wonStage) void commitMove(editingDeal.id, wonStage.id); }}
+          onMarkLost={() => { setEditingId(null); if (lostStage) { setLostReason(""); setLostPrompt({ dealId: editingDeal.id, toStageId: lostStage.id }); } }}
+        />
+      ) : null}
     </div>
+    </EditDealContext.Provider>
   );
 }
 

@@ -2,10 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getAuthContext } from "@/lib/auth/context";
 import { Wordmark } from "@/components/shell/brandmark";
+import { demoAccountExists } from "@/lib/services/demo";
 
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getAuthContext();
   if (ctx) redirect("/today");
+  const isDemo = await demoAccountExists();
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1fr_minmax(0,460px)]">
@@ -44,9 +46,11 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
           </ol>
         </div>
 
-        <p className="text-2xs text-muted">
-          Demo workspace contains fictional companies and people for evaluation only.
-        </p>
+        {isDemo ? (
+          <p className="text-2xs text-muted">
+            Demo workspace contains fictional companies and people for evaluation only.
+          </p>
+        ) : <span />}
       </div>
 
       <div className="flex flex-col justify-center px-5 py-10 sm:px-10">

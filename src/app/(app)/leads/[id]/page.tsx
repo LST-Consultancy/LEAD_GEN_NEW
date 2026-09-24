@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth/context";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { getLeadDossier } from "@/lib/services/lead-detail";
 import { DossierHeader } from "@/components/leads/dossier/header";
 import { AiVerdict, ReadinessChecklist, FitRadarPanel } from "@/components/leads/dossier/verdict";
@@ -14,6 +15,7 @@ import {
   RelationshipMemory,
   TasksAndNotes,
 } from "@/components/leads/dossier/side-panels";
+import { BattlecardPanel } from "@/components/leads/dossier/battlecard";
 
 export async function generateMetadata({
   params,
@@ -44,7 +46,7 @@ export default async function LeadDossierPage({
 
   return (
     <div>
-      <DossierHeader lead={lead} />
+      <DossierHeader lead={lead} canExport={ctx.permissions.includes(PERMISSIONS.LEADS_EXPORT)} />
 
       <div className="mx-auto max-w-[1600px] px-3 py-3 sm:px-4 sm:py-4">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -100,8 +102,9 @@ export default async function LeadDossierPage({
 
           {/* Side column: actions, deals, work, account */}
           <div className="min-w-0 space-y-3">
-            <NextBestActions actions={lead.nextBestActions} />
+            <NextBestActions leadId={lead.id} actions={lead.nextBestActions} />
             <DealsPanel leadId={lead.id} companyName={lead.company.name} deals={lead.deals} />
+            <BattlecardPanel leadId={lead.id} />
             <TasksAndNotes tasks={lead.tasks} notes={lead.notes} leadId={lead.id} />
             <RelationshipMemory memory={lead.person.memory} />
             <CompanyPanel

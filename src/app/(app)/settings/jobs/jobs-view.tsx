@@ -33,7 +33,9 @@ type Monitor = {
     describe: string;
     installed: boolean;
     nextRunAt: string | null;
+    lastSucceededAt: string | null;
   }[];
+  workers: number | null;
   recent: {
     id: string;
     name: string;
@@ -116,8 +118,8 @@ export function JobsView({ initial }: { initial: Monitor }) {
     );
   }
 
-  const workerLikelyDown =
-    monitor.health.ok && monitor.schedules.length > 0 && monitor.schedules.every((s) => !s.installed);
+  // Counted from Redis worker connections, not inferred from schedules.
+  const workerDown = monitor.health.ok && monitor.workers === 0;
 
   return (
     <div className="space-y-4">
@@ -149,12 +151,15 @@ export function JobsView({ initial }: { initial: Monitor }) {
             </p>
           ) : null}
 
-          {workerLikelyDown ? (
+          {workerDown ? (
             <p className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs leading-relaxed text-warning-text">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              Redis is up but no schedules are registered, which means no worker has started since
-              they were defined. Run <code className="font-mono">npm run worker</code> — jobs will
-              queue but nothing will consume them.
+              Redis is up but no worker is connected, so jobs will queue and nothing will run
+              them. Start one with <code className="font-mono">npm run worker</code>.
+            </p>
+          ) : monitor.workers !== null ? (
+            <p className="text-2xs text-muted">
+              <span className="tabular">{monitor.workers}</span> worker {monitor.workers === 1 ? "connection" : "connections"} consuming. Counts below cover the whole queue, not only this workspace.
             </p>
           ) : null}
 
@@ -222,12 +227,19 @@ export function JobsView({ initial }: { initial: Monitor }) {
                     )}
                   </div>
                   <p className="mt-0.5 text-2xs leading-relaxed text-muted">{s.describe}</p>
-                  {s.nextRunAt ? (
-                    <p className="mt-0.5 flex items-center gap-1 text-2xs text-secondary">
-                      <Clock className="size-2.5" />
-                      Next {formatRelative(s.nextRunAt)}
-                    </p>
-                  ) : null}
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-secondary">
+                    {s.nextRunAt ? (
+                      <span className="flex items-center gap-1">
+                        <Clock className="size-2.5" />
+                        Next {formatRelative(s.nextRunAt)}
+                      </span>
+                    ) : null}
+                    <span className={s.lastSucceededAt ? undefined : "text-muted"}>
+                      {s.lastSucceededAt
+                        ? `Last succeeded ${formatAge(s.lastSucceededAt)}`
+                        : "No success in the last day's history"}
+                    </span>
+                  </p>
                 </div>
 
                 {MANUAL_TRIGGER[s.name as JobName]?.allowed ? (

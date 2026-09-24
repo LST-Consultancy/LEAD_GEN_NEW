@@ -10,14 +10,11 @@ import {
   Download,
   Filter,
   LayoutGrid,
-  ListPlus,
   Rows3,
   Search,
   Sparkles,
   Table2,
   Target,
-  Unlock,
-  UserPlus,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,8 +27,10 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { SmartShortcuts } from "@/components/leads/shortcuts";
 import { LeadsTable, LeadsCards, type LeadRow } from "@/components/leads/leads-table";
 import { FilterPanel, type Facets } from "@/components/leads/filter-panel";
+import { AddLeadButton } from "@/components/leads/add-lead-dialog";
+import { BulkActions, SaveSearchButton, SaveSmartListButton, downloadCsv, type BulkPermissions } from "@/components/leads/bulk-actions";
 import { buildLeadQuery, countActiveFilters } from "@/lib/leads/params";
-import type { LeadFilter } from "@/lib/leads/filter";
+import { filterProblems, type LeadFilter } from "@/lib/leads/filter";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +48,7 @@ export function LeadsView({
   shortcutCounts,
   facets,
   initialView,
+  permissions,
 }: {
   rows: LeadRow[];
   total: number;
@@ -61,6 +61,7 @@ export function LeadsView({
   shortcutCounts: Record<string, number>;
   facets: Facets;
   initialView: View;
+  permissions: BulkPermissions;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -144,6 +145,28 @@ export function LeadsView({
               </Badge>
             ) : null}
           </Button>
+          {activeCount > 0 ? <><SaveSearchButton filter={{ ...filter }} /><SaveSmartListButton filter={{ ...filter }} /></> : null}
+          {permissions.export ? (
+            <Tooltip content={`Download all ${total} leads matching the current filters as CSV. Locked contacts stay locked.`}>
+              <Button
+                variant="ghost"
+                size="md"
+                disabled={total === 0}
+                onClick={async () => {
+                  try {
+                    await downloadCsv({ filter: { ...filter } });
+                    toast.success("Export downloaded", { description: `${total} leads. Recorded in the audit log.` });
+                  } catch (err) {
+                    toast.error("Couldn't export", { description: err instanceof Error ? err.message : "Nothing was downloaded." });
+                  }
+                }}
+              >
+                <Download />
+                Export all
+              </Button>
+            </Tooltip>
+          ) : null}
+          {permissions.edit ? <AddLeadButton /> : null}
 
           {activeCount > 0 ? (
             <Button
@@ -212,42 +235,7 @@ export function LeadsView({
             {selected.size} selected
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() =>
-                toast(`Reveal ${selected.size} contacts — not wired up`, {
-                  description: `Would cost ${selected.size} ${selected.size === 1 ? "point" : "points"}. The ledger exists; this button isn't connected yet. Nothing was charged.`,
-                })
-              }
-            >
-              <Unlock />
-              Reveal contacts
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => toast("Lists land in Phase 5")}
-            >
-              <ListPlus />
-              Add to list
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => toast("Assignment lands with TeamCollab")}>
-              <UserPlus />
-              Assign
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                toast("Export requires the leads.export permission", {
-                  description: "Gated deliberately — exporting contact data is auditable.",
-                })
-              }
-            >
-              <Download />
-              Export
-            </Button>
+            <BulkActions ids={[...selected]} permissions={permissions} listId={filter.listId && !facets.lists.find((l) => l.id === filter.listId)?.isDynamic ? filter.listId : undefined} onDone={() => setSelected(new Set())} />
           </div>
           <Button
             variant="ghost"
@@ -257,6 +245,12 @@ export function LeadsView({
           >
             Deselect
           </Button>
+        </div>
+      ) : null}
+
+      {filterProblems(filter).length ? (
+        <div role="alert" className="shrink-0 border-b border-warning-border bg-warning-subtle px-4 py-1.5 text-2xs text-warning-text">
+          {filterProblems(filter).join(" ")} That is why nothing matches — open Filters to fix it.
         </div>
       ) : null}
 

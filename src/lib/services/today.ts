@@ -486,7 +486,7 @@ export async function getLeadOfTheDay(ctx: AuthContext) {
       // Strongest signal first, not newest: this is the evidence the score
       // rests on, so citing a weaker recent one would contradict the headline.
       signals: { orderBy: [{ confidence: "desc" }, { occurredAt: "desc" }], take: 1 },
-      nextBestActions: { orderBy: { rank: "asc" }, take: 1 },
+      nextBestActions: { where: { rejectedAt: null }, orderBy: { rank: "asc" }, take: 1 },
       owner: { select: { id: true, name: true } },
     },
   });

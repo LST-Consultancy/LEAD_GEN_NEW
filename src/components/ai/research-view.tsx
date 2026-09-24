@@ -160,9 +160,10 @@ export function ResearchView({
                 </span>
               </div>
               <p className="text-2xs leading-relaxed text-muted">
-                Working sources today: {capability.sourcesConfigured.join(", ") || "none"}. Each of
-                the rest needs its own authorised access — this product does not scrape pages that
-                forbid it, so a source without a contract or an official API stays unavailable.
+                Connected today: {capability.sourcesConfigured.join(", ") || "nothing"}. These serve
+                opportunity discovery and finding people at a company — not company research. For
+                a researched summary of an opportunity&apos;s own evidence, use Research company on the
+                opportunity.
               </p>
               <ul className="space-y-0.5">
                 {capability.sourcesUnconfigured.map((s) => (

@@ -32,9 +32,11 @@
     "**/*.ts",
     "**/*.tsx",
     ".next-opportunity-e2e/types/**/*.ts",
+    ".next-opportunity-prod/types/**/*.ts",
+    ".next-verify/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-opportunity-prod/types/**/*.ts"
+    ".next-linkedin-check/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/context";
 import {
   listBookings,
-  isCalendarConfigured,
+  canSyncCalendar,
   activeCalendarProvider,
   CALENDAR_PROVIDERS,
   CALENDAR_NOT_CONFIGURED,
 } from "@/lib/services/bookings";
 import { BookingsView } from "@/components/bookings/bookings-view";
+import { db } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Bookings" };
 
@@ -23,14 +24,18 @@ export default async function BookingsPage({
   // Parsed tolerantly: a stale bookmark should not 500.
   const active = window && WINDOWS.has(window) ? window : "upcoming";
 
-  const bookings = await listBookings(ctx, { window: active as "upcoming" });
+  const [bookings, workspace] = await Promise.all([
+    listBookings(ctx, { window: active as "upcoming" }),
+    db.workspace.findUnique({ where: { id: ctx.workspaceId }, select: { bookingUrl: true } }),
+  ]);
 
   return (
     <BookingsView
       bookings={bookings}
       window={active}
+      bookingUrl={workspace?.bookingUrl ?? null}
       calendar={{
-        configured: isCalendarConfigured(),
+        configured: canSyncCalendar(),
         provider: activeCalendarProvider(),
         notConfiguredMessage: CALENDAR_NOT_CONFIGURED,
         providers: CALENDAR_PROVIDERS,

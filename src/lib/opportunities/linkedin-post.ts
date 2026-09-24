@@ -15,6 +15,26 @@ function postedAt(raw: unknown): string | null {
   return sourceDate(/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(iso) ? `${iso}Z` : iso);
 }
 
+// A post dated tomorrow is a parsing error, not a post; its date is unknown rather than trusted.
+const plausibleDate = (iso: string | null) => (iso && Date.parse(iso) > Date.now() + 86400000 ? null : iso);
+
+/**
+ * One post has several URLs (a /posts/ slug, a /feed/update/urn:li:activity: link, tracking
+ * parameters), so dedupe uses LinkedIn's own activity id when any field or the URL carries it,
+ * and otherwise the URL without its query string or trailing slash.
+ */
+export function linkedInPostKey(item: unknown, url: string): string {
+  const r = obj(item);
+  const fields = [r.activity_id, r.activityId, r.urn, r.full_urn, r.fullUrn, r.post_id, r.postId, r.id, url].filter(v => typeof v === "string" || typeof v === "number").map(String);
+  for (const f of fields) {
+    const m = /(?:activity|ugcPost|share)[:-](\d{10,})/i.exec(f) ?? (/^\d{15,}$/.test(f) ? [f, f] : null);
+    if (m) return `activity:${m[1]}`;
+  }
+  try { const u = new URL(url); return `url:${u.hostname.replace(/^www\./, "").toLowerCase()}${u.pathname.replace(/\/+$/, "")}`; } catch { return `url:${url}`; }
+}
+/** LinkedIn post links need no query string; every parameter on them is tracking. */
+function postUrl(url: string) { const u = new URL(canonicalUrl(url)); u.search = ""; u.pathname = u.pathname.replace(/\/+$/, "") || "/"; return u.toString(); }
+
 /**
  * Maps one scraped LinkedIn post. Scraper output formats differ and change without notice, so this
  * accepts the common spellings and returns null for anything it cannot read — the caller counts those.
@@ -32,11 +52,13 @@ export function mapLinkedInPost(item: unknown, provider: string, searchQuery: st
   const headline = text(author.headline, author.occupation, author.title, author.description, r.author_headline, r.authorHeadline);
   const profile = text(author.profile_url, author.profileUrl, author.url, author.linkedinUrl, r.author_profile_url, r.authorProfileUrl);
   const byline = [name, headline].filter(Boolean).join(", ");
-  const sourceUrl = canonicalUrl(url);
+  const sourceUrl = postUrl(url);
+  const location = text(author.location, r.author_location, r.authorLocation);
   return {
     provider, kind: "LINKEDIN_PUBLIC_POST", externalId: sourceUrl, sourceUrl,
     title: body.replace(/\s+/g, " ").slice(0, 140), description: byline ? `${body}\n\nPosted by ${byline}` : body,
-    company: { name: "" }, postedAt: postedAt(r.posted_at ?? r.postedAt ?? r.date ?? r.created_at ?? r.createdAt ?? r.time),
-    status: "UNKNOWN", rawSourceReference: { searchQuery, authorName: name ?? null, authorHeadline: headline ?? null, authorProfileUrl: profile ?? null },
+    company: { name: "" }, postedAt: plausibleDate(postedAt(r.posted_at ?? r.postedAt ?? r.date ?? r.created_at ?? r.createdAt ?? r.time)),
+    status: "UNKNOWN", // The author's location is where a person is, not where the buying company is, so it is kept as evidence only.
+    rawSourceReference: { searchQuery, postKey: linkedInPostKey(item, url), authorName: name ?? null, authorHeadline: headline ?? null, authorProfileUrl: profile ?? null, authorLocation: location ?? null },
   };
 }

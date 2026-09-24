@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { MutationError } from "@/lib/services/mutate";
 import { recordActivity, recordExternalAudit } from "@/lib/services/audit";
 import { computeTotals, reconcile, isExpired, daysUntilExpiry } from "@/lib/proposals/money";
+import { raiseNotification } from "@/lib/services/notify";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 /**
  * The prospect-facing proposal.
@@ -22,7 +24,7 @@ export type PublicProposal = {
   title: string;
   state: string;
   company: { name: string };
-  workspace: { name: string; logoUrl: string | null };
+  workspace: { name: string; logoUrl: string | null; contact: { email: string | null; phone: string | null; website: string | null; address: string | null } | null };
   currency: string;
   subtotalInr: number;
   taxRate: number;
@@ -62,7 +64,7 @@ async function loadByToken(token: string) {
     include: {
       items: { orderBy: { sortOrder: "asc" } },
       company: { select: { name: true } },
-      workspace: { select: { id: true, name: true, logoUrl: true, timezone: true } },
+      workspace: { select: { id: true, name: true, logoUrl: true, timezone: true, proposalDefaults: { select: { logoDataUrl: true, contactEmail: true, contactPhone: true, website: true, address: true } } } },
     },
   });
 }
@@ -105,7 +107,12 @@ export async function getPublicProposal(token: string): Promise<PublicProposal |
     title: p.title,
     state: expired && !decided ? "EXPIRED" : p.state,
     company: { name: p.company.name },
-    workspace: { name: p.workspace.name, logoUrl: p.workspace.logoUrl },
+    // Branding is read live (a new logo shows on old proposals); price and terms are the proposal's own.
+    workspace: {
+      name: p.workspace.name,
+      logoUrl: p.workspace.proposalDefaults?.logoDataUrl ?? p.workspace.logoUrl,
+      contact: p.workspace.proposalDefaults ? { email: p.workspace.proposalDefaults.contactEmail, phone: p.workspace.proposalDefaults.contactPhone, website: p.workspace.proposalDefaults.website, address: p.workspace.proposalDefaults.address } : null,
+    },
     currency: p.currency,
     ...(trustworthy ? stored : recomputed),
     items,
@@ -185,6 +192,7 @@ export async function recordProposalView(
     }),
   ]);
 
+  await emitWebhookEvent(p.workspaceId, "proposal.viewed", { proposalId: p.id, firstView: !p.firstViewedAt });
   return { recorded: true };
 }
 
@@ -280,11 +288,13 @@ export async function decidePublicProposal(
     }
   );
 
+  if (input.decision === "accept") await emitWebhookEvent(p.workspaceId, "proposal.accepted", { proposalId: p.id, totalInr: Number(p.totalInr), via: "link", claimedName: input.byName });
+
   // Notifications are per-user, so this goes to whoever is accountable for the
   // proposal: its author, or the lead's owner if it has no author.
   const notify = p.createdById ?? (await ownerOfLead(p.leadId));
   if (notify) {
-    await db.notification.create({
+    await raiseNotification({
       data: {
         workspaceId: p.workspaceId,
         userId: notify,

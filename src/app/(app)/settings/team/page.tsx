@@ -3,6 +3,9 @@ import type { Metadata } from "next";
 import { Check, Minus, ShieldCheck, Users } from "lucide-react";
 import { requireAuth } from "@/lib/auth/context";
 import { getTeamSettings } from "@/lib/services/settings";
+import { assignableRoles, listInvitations } from "@/lib/services/team";
+import { PERMISSIONS } from "@/lib/auth/permissions";
+import { InvitationsCard, MemberActions } from "./team-admin";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -35,6 +38,8 @@ const GROUPS: { label: string; prefix: string }[] = [
 export default async function TeamSettingsPage() {
   const ctx = await requireAuth();
   const { members, roles, allPermissions } = await getTeamSettings(ctx);
+  const canManage = ctx.permissions.includes(PERMISSIONS.USERS_MANAGE);
+  const [grantable, invitations] = canManage ? await Promise.all([assignableRoles(ctx), listInvitations(ctx)]) : [[], []];
 
   return (
     <div className="space-y-4">
@@ -65,7 +70,7 @@ export default async function TeamSettingsPage() {
               <caption className="sr-only">Workspace members, their roles and workload</caption>
               <thead className="bg-surface-sunken">
                 <tr className="border-y border-border">
-                  {["Member", "Role", "Leads", "Open deals", "Pipeline", "Point cap", "Joined"].map(
+                  {["Member", "Role", "Leads", "Open deals", "Pipeline", "Point cap", "Joined", ...(canManage ? ["Manage"] : [])].map(
                     (h, i) => (
                       <th
                         key={h}
@@ -120,6 +125,11 @@ export default async function TeamSettingsPage() {
                     <td className="px-3 py-2 text-right text-2xs text-muted">
                       {formatAge(m.joinedAt)}
                     </td>
+                    {canManage ? (
+                      <td className="px-3 py-2">
+                        <MemberActions member={{ id: m.id, name: m.user.name, roleId: m.role.id, roleName: m.role.name, isYou: m.isYou }} roles={grantable} />
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -128,11 +138,14 @@ export default async function TeamSettingsPage() {
         </CardContent>
         <CardFooter>
           <p className="text-2xs text-muted">
-            Inviting and removing members isn&apos;t wired up yet. Every row above is a real
-            membership record.
+            {canManage
+              ? "Role changes and removals apply from the member's next click. A workspace always keeps at least one owner."
+              : "Only people who can manage users can invite, change roles or remove members."}
           </p>
         </CardFooter>
       </Card>
+
+      {canManage ? <InvitationsCard initial={invitations} roles={grantable} /> : null}
 
       <Card>
         <CardHeader>

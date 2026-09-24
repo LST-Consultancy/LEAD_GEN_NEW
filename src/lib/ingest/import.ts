@@ -9,6 +9,7 @@ import { MutationError } from "@/lib/services/mutate";
 import { recordActivity, recordAudit } from "@/lib/services/audit";
 import { enqueue } from "@/lib/queue/producer";
 import { JOB } from "@/lib/queue/jobs";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 /**
  * Manual lead import.
@@ -55,7 +56,7 @@ export const importRequestSchema = z
 
 export type ImportResult = {
   imported: number;
-  skipped: { row: number; name: string; reason: string }[];
+  skipped: { row: number; name: string; reason: string; existingLeadId?: string }[];
   leadIds: string[];
   rescoreQueued: boolean;
   note: string;
@@ -236,6 +237,7 @@ export async function importLeads(
             row: index + 1,
             name: row.fullName,
             reason: `Already a lead at ${company.name}. Nothing was overwritten.`,
+            existingLeadId: existingLead.id,
           });
           continue;
         }
@@ -454,6 +456,8 @@ export async function importLeads(
           : undefined,
     }),
   ]);
+
+  for (const leadId of leadIds) await emitWebhookEvent(ctx.workspaceId, "lead.created", { leadId, source: input.sourceLabel });
 
   return {
     imported: leadIds.length,

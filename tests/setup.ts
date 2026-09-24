@@ -1,10 +1,7 @@
-import "dotenv/config";
+// Tests write fixtures and enqueue jobs, and the working database holds real
+// customer data, so they run against their own database and Redis db.
+import { testEnv } from "../scripts/test-env.mjs";
 
-// Integration tests run against the dev database. Guard against pointing them
-// at anything that looks like production, because they truncate tables.
-const url = process.env.DATABASE_URL ?? "";
-if (!/localhost|127\.0\.0\.1/.test(url)) {
-  throw new Error(
-    `Refusing to run tests against a non-local database: ${url.replace(/:[^:@]+@/, ":***@")}`
-  );
-}
+const env = testEnv();
+process.env.DATABASE_URL = env.DATABASE_URL;
+if (env.REDIS_URL) process.env.REDIS_URL = env.REDIS_URL;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth/context";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import {
   getFilterFacets,
   getShortcutCounts,
@@ -43,6 +44,12 @@ export default async function LeadsPage({
       shortcutCounts={shortcutCounts}
       facets={facets}
       initialView={initialView}
+      permissions={{
+        reveal: ctx.permissions.includes(PERMISSIONS.LEADS_REVEAL),
+        reassign: ctx.permissions.includes(PERMISSIONS.LEADS_VIEW_ALL),
+        export: ctx.permissions.includes(PERMISSIONS.LEADS_EXPORT),
+        edit: ctx.permissions.includes(PERMISSIONS.LEADS_EDIT),
+      }}
     />
   );
 }

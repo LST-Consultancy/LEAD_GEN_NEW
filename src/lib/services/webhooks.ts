@@ -44,8 +44,8 @@ export const WEBHOOK_EVENTS: WebhookEvent[] = [
     key: "message.replied",
     label: "Reply received",
     describes: "Someone answered an outbound message.",
-    emitted: false,
-    note: "No mailbox is connected, so no reply can arrive to emit this.",
+    emitted: true,
+    note: "Raised when a reply is logged on a lead. No mailbox reader is built, so replies are logged by hand; the payload says loggedByHand.",
   },
   {
     key: "deal.stage_changed",

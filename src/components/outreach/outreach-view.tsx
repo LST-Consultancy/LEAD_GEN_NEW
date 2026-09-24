@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { EnrollLeadsButton, EnrollmentList } from "@/components/outreach/sequence-actions";
 import {
   AlertTriangle,
   Ban,
@@ -100,13 +102,16 @@ export function OutreachView({
 
   return (
     <div className="flex flex-col gap-3">
-      <div>
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1">
         <h1 className="text-lg font-semibold text-primary">Outreach</h1>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
           Multi-step sequences with the guardrails that keep a sending domain alive: a send
           window, a daily cap, stop-on-reply, and a do-not-contact list checked before every
           send.
         </p>
+        </div>
+        <Button variant="primary" size="sm" asChild><Link href="/outreach/new">New sequence</Link></Button>
       </div>
 
       <ProviderBanner provider={provider} />
@@ -129,6 +134,7 @@ export function OutreachView({
               icon={Send}
               title="No sequences yet"
               description="A sequence is a short series of messages with days between them, and rules about when it stops. Building one here means the send window, the cap and the stop conditions are enforced by the engine rather than remembered by a person."
+              action={<Button variant="primary" size="sm" asChild><Link href="/outreach/new">Build your first sequence</Link></Button>}
             />
           </CardContent>
         </Card>
@@ -289,13 +295,15 @@ function SequenceCard({
           </div>
         </button>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="text-right">
             <p className="text-2xs text-muted">Enrolled</p>
             <p className="text-sm font-semibold tabular text-primary">
               {formatNumber(sequence.stats.enrolled)}
             </p>
           </div>
+          <Button size="sm" variant="ghost" asChild><Link href={`/outreach/${sequence.id}/edit`}>Edit</Link></Button>
+          <EnrollLeadsButton sequenceId={sequence.id} sequenceName={sequence.name} />
           <Button
             size="sm"
             variant={sequence.isActive ? "secondary" : "primary"}
@@ -346,6 +354,10 @@ function SequenceCard({
 
       {expanded ? (
         <CardContent className="flex flex-col gap-3 pt-0">
+          <div className="space-y-1">
+            <p className="text-2xs font-semibold uppercase tracking-wider text-muted">Enrolled</p>
+            <EnrollmentList sequenceId={sequence.id} />
+          </div>
           <div className="grid gap-2 sm:grid-cols-4">
             <MiniStat label="Mid-sequence" value={sequence.stats.active} />
             <MiniStat label="Finished" value={sequence.stats.completed} />

@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { AuthContext } from "@/lib/auth/context";
 import { leadVisibilityFilter } from "@/lib/auth/context";
 import { toPlain } from "@/lib/serialize";
+import { startOfLocalDay } from "@/lib/format";
 import { leadFilterSchema, SHORTCUTS, type LeadFilter } from "@/lib/leads/filter";
 
 // Re-exported so server callers have a single import site.
@@ -18,7 +19,8 @@ export type { LeadFilter };
 // Query building
 // --------------------------------------------------------------------------
 
-function buildWhere(ctx: AuthContext, f: Partial<LeadFilter>): Prisma.LeadWhereInput {
+/** Also used by export, so an export returns exactly what the Leads screen shows. */
+export function buildWhere(ctx: AuthContext, f: Partial<LeadFilter>): Prisma.LeadWhereInput {
   const now = Date.now();
 
   // Tenant scope and row-level visibility are non-negotiable and always AND-ed,
@@ -70,6 +72,8 @@ function buildWhere(ctx: AuthContext, f: Partial<LeadFilter>): Prisma.LeadWhereI
   if (f.industries?.length) companyFilter.industry = { in: f.industries };
   if (f.cities?.length) companyFilter.city = { in: f.cities };
   if (f.states?.length) companyFilter.state = { in: f.states };
+  if (f.countries?.length) companyFilter.country = { in: f.countries };
+  if (f.tags?.length) companyFilter.tags = { hasSome: f.tags };
   if (f.technologies?.length) companyFilter.technologies = { hasSome: f.technologies };
   if (f.employeeMin !== undefined || f.employeeMax !== undefined) {
     companyFilter.employeeCount = {
@@ -99,6 +103,7 @@ function buildWhere(ctx: AuthContext, f: Partial<LeadFilter>): Prisma.LeadWhereI
     clauses.push({ signals: { some: { type: { in: f.signalTypes as never } } } });
   }
   if (f.hasSignal) clauses.push({ signals: { some: {} } });
+  if (f.sources?.length) clauses.push({ signals: { some: { sourceKind: { in: f.sources }, deletedAt: null } } });
 
   if (f.budgetMin !== undefined || f.budgetMax !== undefined) {
     clauses.push({
@@ -112,6 +117,17 @@ function buildWhere(ctx: AuthContext, f: Partial<LeadFilter>): Prisma.LeadWhereI
 
   if (f.surfacedWithinDays !== undefined) {
     clauses.push({ surfacedAt: { gte: new Date(now - f.surfacedWithinDays * 86_400_000) } });
+  }
+  if (f.surfacedFrom || f.surfacedTo) {
+    // Whole calendar days where the workspace is, the "to" day included.
+    const tz = ctx.workspace.timezone ?? "Asia/Kolkata";
+    const nextDay = (key: string) => { const d = new Date(`${key}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+    clauses.push({
+      surfacedAt: {
+        ...(f.surfacedFrom ? { gte: startOfLocalDay(f.surfacedFrom, tz) } : {}),
+        ...(f.surfacedTo ? { lt: startOfLocalDay(nextDay(f.surfacedTo), tz) } : {}),
+      },
+    });
   }
   if (f.notContactedForDays !== undefined) {
     const cutoff = new Date(now - f.notContactedForDays * 86_400_000);
@@ -143,7 +159,16 @@ function buildWhere(ctx: AuthContext, f: Partial<LeadFilter>): Prisma.LeadWhereI
   return f.combine === "OR" ? { ...base, OR: clauses } : { ...base, AND: clauses };
 }
 
+/**
+ * Every ordering ends on the id, so rows that tie on the sort key keep one
+ * order between requests. Without it, Postgres may return ties in any order and
+ * a lead can appear on two pages or on none.
+ */
 function buildOrderBy(f: Partial<LeadFilter>): Prisma.LeadOrderByWithRelationInput[] {
+  return [...sortKeys(f), { id: "asc" }];
+}
+
+function sortKeys(f: Partial<LeadFilter>): Prisma.LeadOrderByWithRelationInput[] {
   const dir = (f.dir ?? "desc") as Prisma.SortOrder;
   switch (f.sort ?? "score") {
     case "surfaced":
@@ -388,9 +413,18 @@ export async function getFilterFacets(ctx: AuthContext) {
     }),
     db.company.findMany({
       where: { workspaceId: ctx.workspaceId, deletedAt: null },
-      select: { technologies: true },
+      select: { technologies: true, tags: true, country: true },
     }),
   ]);
+  // Offered from what is stored, so every option can match something. The list
+  // used to be hard-coded ("c-level") while titles are stored as "c_level".
+  const seniorities = await db.employment.findMany({
+    where: { workspaceId: ctx.workspaceId, isCurrent: true, seniority: { not: null } },
+    distinct: ["seniority"],
+    select: { seniority: true },
+    orderBy: { seniority: "asc" },
+  });
+  const sourceKinds = await db.signal.findMany({ where: { workspaceId: ctx.workspaceId, deletedAt: null }, distinct: ["sourceKind"], select: { sourceKind: true } });
 
   return {
     industries: industries.map((i) => i.industry!).filter(Boolean),
@@ -400,10 +434,10 @@ export async function getFilterFacets(ctx: AuthContext) {
     lists: lists.map((l) => ({ id: l.id, name: l.name, isDynamic: l.isDynamic, count: l._count.members })),
     signalTypes: signalTypes.map((s) => s.type),
     technologies: [...new Set(technologies.flatMap((t) => t.technologies))].sort(),
-    seniorities: [
-      "founder", "c-level", "owner", "president", "vp", "director", "head",
-      "senior_manager", "manager", "lead", "senior", "individual",
-    ],
+    tags: [...new Set(technologies.flatMap((t) => t.tags))].sort(),
+    countries: [...new Set(technologies.map((t) => t.country).filter((c): c is string => Boolean(c)))].sort(),
+    sources: sourceKinds.map((s) => s.sourceKind),
+    seniorities: seniorities.map((s) => s.seniority!).filter(Boolean),
     departments: [
       "Executive", "Technology", "Finance", "Operations", "Sales", "Marketing", "Procurement",
     ],

@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 import {
   scoreLead,
   DEFAULT_WEIGHTS,
@@ -268,6 +269,9 @@ export async function rescoreWorkspace(
       });
 
       summary.evidenceRows += result.evidence.length;
+      if (lead.tier !== tier) {
+        await emitWebhookEvent(workspaceId, "lead.scored", { leadId: lead.id, fromTier: lead.tier, toTier: tier, scoreOutOf100: result.composite });
+      }
     }
 
     if (opts.leadIds?.length) break;

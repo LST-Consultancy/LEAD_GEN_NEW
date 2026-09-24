@@ -13,6 +13,9 @@ const ARRAY_KEYS = [
   "industries",
   "cities",
   "states",
+  "countries",
+  "tags",
+  "sources",
   "seniorities",
   "departments",
   "signalTypes",
@@ -32,6 +35,8 @@ const BOOL_KEYS = [
   "needsFollowUp",
   "includeArchived",
 ] as const;
+
+const DATE_KEYS = ["surfacedFrom", "surfacedTo"] as const;
 
 const NUM_KEYS = [
   "minScore",
@@ -58,6 +63,10 @@ export function parseLeadParams(
   if (first(params.sort)) raw.sort = first(params.sort);
   if (first(params.dir)) raw.dir = first(params.dir);
   if (first(params.listId)) raw.listId = first(params.listId);
+  for (const key of DATE_KEYS) {
+    const value = first(params[key]);
+    if (value) raw[key] = value;
+  }
 
   for (const key of ARRAY_KEYS) {
     const value = first(params[key]);
@@ -122,6 +131,10 @@ export function buildLeadQuery(
   if (filter.sort && filter.sort !== "score") sp.set("sort", filter.sort);
   if (filter.dir && filter.dir !== "desc") sp.set("dir", filter.dir);
   if (filter.listId) sp.set("listId", filter.listId);
+  for (const key of DATE_KEYS) {
+    const value = filter[key];
+    if (value) sp.set(key, value);
+  }
 
   for (const key of ARRAY_KEYS) {
     const value = filter[key];
@@ -159,5 +172,6 @@ export function countActiveFilters(filter: Partial<LeadFilter>): number {
     if (filter[key] !== undefined) n++;
   }
   if (filter.listId) n++;
+  for (const key of DATE_KEYS) if (filter[key]) n++;
   return n;
 }

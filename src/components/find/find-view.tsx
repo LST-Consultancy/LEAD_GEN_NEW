@@ -27,6 +27,8 @@ import { Metric } from "@/components/charts/metric";
 import { ApiError, api } from "@/lib/api/client";
 import { FIELD_LABEL, type Extraction, type ExtractionField } from "@/lib/icp/extract";
 import type { SourceDescriptor } from "@/lib/ingest/sources";
+import type { ProviderReadiness } from "@/lib/services/capabilities";
+import { PROVIDER_STATE_LABEL } from "@/lib/vocab";
 import { SIGNAL_SOURCE_LABEL } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +57,7 @@ export function FindView({
   sources,
 }: {
   hasIcp: boolean;
-  sources: { available: SourceDescriptor[]; pending: SourceDescriptor[] };
+  sources: { available: SourceDescriptor[]; pending: SourceDescriptor[]; connected: ProviderReadiness[] };
 }) {
   return (
     <div className="mx-auto max-w-4xl space-y-4 px-3 py-4 sm:px-4">
@@ -726,17 +728,37 @@ function ImportTab({ hasIcp }: { hasIcp: boolean }) {
 function SourcesTab({
   sources,
 }: {
-  sources: { available: SourceDescriptor[]; pending: SourceDescriptor[] };
+  sources: { available: SourceDescriptor[]; pending: SourceDescriptor[]; connected: ProviderReadiness[] };
 }) {
   return (
     <div className="space-y-3">
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Where signals come from</CardTitle>
+            <CardTitle>Connected providers</CardTitle>
+            <p className="mt-0.5 text-2xs text-muted">What Find Opportunities and Find people actually run on, with each provider&apos;s last test result.</p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-1.5">
+          {sources.connected.length === 0 ? (
+            <p className="text-2xs text-muted">No providers connected. Connect one in Settings → Providers.</p>
+          ) : sources.connected.map((p) => (
+            <p key={p.id} className="flex flex-wrap items-center gap-1.5 text-xs text-primary">
+              {p.name}
+              <Badge size="sm" uppercase variant={p.state === "healthy" ? "success" : p.state === "failing" ? "danger" : "neutral"}>
+                {PROVIDER_STATE_LABEL[p.state]}
+              </Badge>
+            </p>
+          ))}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Search-phrase sources</CardTitle>
             <p className="mt-0.5 text-2xs text-muted">
-              Discovery is only as good as its sources. These are the ones this workspace can and
-              cannot reach.
+              What search phrases could fetch from. None of these is wired to a provider yet —
+              opportunity discovery above uses the connected providers instead.
             </p>
           </div>
         </CardHeader>
@@ -776,9 +798,8 @@ function SourcesTab({
         <CardFooter>
           <p className="flex items-start gap-1.5 text-2xs leading-relaxed text-muted">
             <Target className="mt-0.5 size-3 shrink-0" />
-            Search phrases, scheduling and per-phrase revenue attribution all work today. Only the
-            fetching is missing, and it is missing because it needs a licence or an API key — not
-            because it is unbuilt guesswork.
+            Search phrases, scheduling and per-phrase revenue attribution work today. Fetching for
+            phrases is not built; save a watch on Find Opportunities to monitor for new demand.
           </p>
         </CardFooter>
       </Card>

@@ -29,6 +29,8 @@ export const JOB = {
   RESCORE_WORKLIST: "tasks.rescore_worklist",
   /** Delivers one webhook event, with retries. */
   DELIVER_WEBHOOK: "webhook.deliver",
+  /** Re-queues webhook deliveries recorded while the queue was unreachable. */
+  REQUEUE_WEBHOOKS: "webhook.requeue_stranded",
   /** Raises notifications for things that became urgent since the last run. */
   SWEEP_NOTIFICATIONS: "notifications.sweep",
   /** Sends one outbound message, re-checking sendability at send time. */
@@ -66,6 +68,7 @@ export type JobPayloads = {
   [JOB.RESCORE_WORKLIST]: { workspaceId: string };
   [JOB.DELIVER_WEBHOOK]: { workspaceId: string; deliveryId: string };
   [JOB.SWEEP_NOTIFICATIONS]: { workspaceId: string };
+  [JOB.REQUEUE_WEBHOOKS]: { workspaceId: string };
   [JOB.SEND_MESSAGE]: { messageId: string };
   [JOB.ADVANCE_SEQUENCES]: { workspaceId: string };
   [JOB.WAKE_SNOOZED]: { workspaceId: string };
@@ -95,6 +98,7 @@ export const JOB_POLICY: Record<
   // Webhook delivery retries hardest and longest — the receiver may be down.
   [JOB.DELIVER_WEBHOOK]: { attempts: 6, backoffMs: 30_000, timeoutMs: 30_000 },
   [JOB.SWEEP_NOTIFICATIONS]: { attempts: 2, backoffMs: 10_000, timeoutMs: 60_000 },
+  [JOB.REQUEUE_WEBHOOKS]: { attempts: 2, backoffMs: 30_000, timeoutMs: 60_000 },
   // A send is retried, but not aggressively: the risk of a duplicate landing
   // in someone's mailbox is worse than the send being late.
   [JOB.SEND_MESSAGE]: { attempts: 3, backoffMs: 60_000, timeoutMs: 30_000 },
@@ -141,6 +145,10 @@ export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: str
   [JOB.SWEEP_NOTIFICATIONS]: {
     cron: "*/15 * * * *",
     describe: "Every fifteen minutes.",
+  },
+  [JOB.REQUEUE_WEBHOOKS]: {
+    cron: "7,37 * * * *",
+    describe: "Twice an hour — a receiver learns of an event late rather than never after a queue outage.",
   },
   [JOB.ADVANCE_SEQUENCES]: {
     cron: "*/10 * * * *",
@@ -196,6 +204,7 @@ export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: fals
     [JOB.ARCHIVE_STALE_LEADS]: { allowed: true },
     [JOB.PURGE_RECYCLE_BIN]: { allowed: true },
     [JOB.SWEEP_NOTIFICATIONS]: { allowed: true },
+    [JOB.REQUEUE_WEBHOOKS]: { allowed: true },
     [JOB.WAKE_SNOOZED]: { allowed: true },
     [JOB.EXPIRE_PROPOSALS]: { allowed: true },
     [JOB.AUDIT_PROPOSAL_TOTALS]: { allowed: true },
@@ -238,6 +247,7 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.RESCORE_WORKLIST]: "Re-rank worklist",
   [JOB.DELIVER_WEBHOOK]: "Deliver webhook",
   [JOB.SWEEP_NOTIFICATIONS]: "Sweep notifications",
+  [JOB.REQUEUE_WEBHOOKS]: "Re-send stranded webhooks",
   [JOB.SEND_MESSAGE]: "Send one message",
   [JOB.ADVANCE_SEQUENCES]: "Advance sequences",
   [JOB.WAKE_SNOOZED]: "Wake snoozed threads",
@@ -246,3 +256,83 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.GENERATE_COACH_TIPS]: "Generate sales coach tips",
   [JOB.GENERATE_DAILY_BRIEFS]: "Generate daily briefs",
 };
+
+// ---------------------------------------------------------------------------
+// Envelope validation and scheduler identity
+// ---------------------------------------------------------------------------
+
+/**
+ * BullMQ reserves ':' as its own key separator and rejects a custom job id
+ * containing one, so ids are normalised here rather than every caller having
+ * to remember. Anything outside a safe set becomes a dash.
+ */
+export function safeJobId(key: string): string {
+  return key.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 200);
+}
+
+/** The one id a recurring job for a workspace is scheduled under. */
+export function schedulerId(name: JobName, workspaceId: string): string {
+  return safeJobId(`${name}-${workspaceId}`);
+}
+
+/**
+ * The schedulers that should exist for these workspaces. Anything else in Redis
+ * is stale: a workspace that was deleted, a job that was unscheduled, or the
+ * pre-`safeJobId` `name:workspace` format — which ran every job twice beside
+ * its replacement.
+ */
+export function staleSchedulerIds(existing: string[], workspaceIds: string[]): string[] {
+  const expected = new Set(
+    (Object.keys(JOB_SCHEDULE) as JobName[]).flatMap((name) => workspaceIds.map((ws) => schedulerId(name, ws)))
+  );
+  return existing.filter((id) => !expected.has(id));
+}
+
+/** A job the worker refuses before running anything. Retrying it cannot help. */
+export class JobEnvelopeError extends Error {
+  readonly retryable = false;
+  constructor(message: string, readonly code: "no_payload" | "unknown_job" | "no_workspace" | "workspace_gone") {
+    super(message);
+    this.name = "JobEnvelopeError";
+  }
+}
+
+const JOB_NAMES = new Set<string>(Object.values(JOB));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Checks what BullMQ handed the worker before a handler sees it.
+ *
+ * The historical "Job undefined received no workspaceId" failures were jobs
+ * whose Redis record had been emptied while still scheduled — no name, no
+ * payload — for workspaces that had since been deleted. Every handler is
+ * workspace-scoped, so a job with no workspace must fail here rather than run
+ * against nothing (or, worse, everything).
+ */
+export function validateJobEnvelope(
+  jobId: string | undefined,
+  name: string | undefined,
+  data: unknown
+): { name: JobName; workspaceId: string } {
+  const ref = jobId ? `Job ${jobId}` : "A job";
+  if (!name && (data === undefined || data === null || (typeof data === "object" && Object.keys(data).length === 0))) {
+    throw new JobEnvelopeError(
+      `${ref} has no name and no payload: its record was emptied in Redis while it was still scheduled, usually because its workspace was deleted. Nothing ran. The worker removes stale schedules on its next start.`,
+      "no_payload"
+    );
+  }
+  if (!name || !JOB_NAMES.has(name)) {
+    throw new JobEnvelopeError(`${ref} is named "${name ?? ""}", which this version does not run. Nothing ran. If it is an old schedule, restarting the worker removes it.`, "unknown_job");
+  }
+  const workspaceId = (data as { workspaceId?: unknown } | null)?.workspaceId;
+  if (typeof workspaceId !== "string" || !UUID.test(workspaceId)) {
+    throw new JobEnvelopeError(`${ref} (${name}) carries no valid workspaceId, so it was refused rather than run unscoped. Nothing ran.`, "no_workspace");
+  }
+  return { name: name as JobName, workspaceId };
+}
+
+/** The scheduler a repeat job came from: `repeat:<schedulerId>:<millis>`. */
+export function schedulerIdOfJob(jobId: string | undefined): string | null {
+  const m = /^repeat:(.+):\d+$/.exec(jobId ?? "");
+  return m ? m[1] : null;
+}

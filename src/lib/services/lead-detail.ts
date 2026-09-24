@@ -37,7 +37,7 @@ export async function getLeadDossier(ctx: AuthContext, leadId: string) {
       score: { include: { evidence: { orderBy: [{ dimension: "asc" }, { points: "desc" }] } } },
       signals: { orderBy: { occurredAt: "desc" } },
       readiness: { orderBy: { sortOrder: "asc" } },
-      nextBestActions: { orderBy: { rank: "asc" } },
+      nextBestActions: { where: { rejectedAt: null }, orderBy: { rank: "asc" } },
       notes: {
         where: { deletedAt: null },
         orderBy: { createdAt: "desc" },
@@ -192,6 +192,7 @@ export async function getLeadDossier(ctx: AuthContext, leadId: string) {
       avatarUrl: lead.person.avatarUrl,
       linkedinUrl: lead.person.linkedinUrl,
       location: [lead.person.city, lead.person.state].filter(Boolean).join(", "),
+      city: lead.person.city,
       languages: lead.person.languages,
       title: employment?.title ?? "—",
       department: employment?.department ?? null,

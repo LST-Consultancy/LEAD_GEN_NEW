@@ -20,7 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
-import { api } from "@/lib/api/client";
+import { ApiError, api } from "@/lib/api/client";
+import { EmptyState } from "@/components/ui/states";
 import { cn } from "@/lib/utils";
 import { formatAge, formatNumber } from "@/lib/format";
 
@@ -76,7 +77,7 @@ const REMIT: Record<string, string> = {
   REVENUE_ANALYST: "Answers questions about the numbers from real queries.",
 };
 
-export function AgentsView({ agents, aiConfigured }: { agents: Agent[]; aiConfigured: boolean }) {
+export function AgentsView({ agents, aiConfigured, canConfigure = false }: { agents: Agent[]; aiConfigured: boolean; canConfigure?: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const inert = agents.filter((a) => a.health.inert);
@@ -87,7 +88,7 @@ export function AgentsView({ agents, aiConfigured }: { agents: Agent[]; aiConfig
       <div>
         <h1 className="text-lg font-semibold text-primary">AI Agents</h1>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
-          Eight specialised agents, each with its own remit, its own tools, its own budget and its
+          {agents.length ? `${agents.length} specialised ${agents.length === 1 ? "agent" : "agents"}` : "Specialised agents"}, each with its own remit, its own tools, its own budget and its
           own approval policy. An agent can only call the tools listed against it — never anything
           else.
         </p>
@@ -118,6 +119,8 @@ export function AgentsView({ agents, aiConfigured }: { agents: Agent[]; aiConfig
           not built. Either way those agents would do nothing.
         </div>
       ) : null}
+
+      {agents.length === 0 ? <SetUpAgents canConfigure={canConfigure} /> : null}
 
       <div className="flex flex-col gap-2">
         {agents.map((a) => (
@@ -414,5 +417,31 @@ function BudgetBar({
         <p className="mt-0.5 text-2xs text-muted">{unlimitedNote}</p>
       )}
     </div>
+  );
+}
+
+/** No agents yet: add the catalogue, switched off, so each can be reviewed before it does anything. */
+function SetUpAgents({ canConfigure }: { canConfigure: boolean }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  async function setUp() {
+    setPending(true);
+    try { const r = await api.post<{ note: string }>("/api/agents/provision", {}); setNote(r.note); router.refresh(); }
+    catch (err) { setNote(err instanceof ApiError ? err.message : "Nothing was set up."); }
+    finally { setPending(false); }
+  }
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <EmptyState
+          icon={Bot}
+          title="No agents set up in this workspace"
+          description="Setting up adds the prospecting, research, SDR, follow-up, pipeline, proposal, meeting and revenue-analyst agents — every one switched off and set to review first. Nothing runs until you enable one."
+          action={canConfigure ? <Button variant="primary" size="sm" loading={pending} onClick={() => void setUp()}>Set up agents</Button> : <p className="text-2xs text-muted">Ask someone who can configure agents to set them up.</p>}
+        />
+        {note ? <p className="px-4 pb-3 text-2xs text-secondary">{note}</p> : null}
+      </CardContent>
+    </Card>
   );
 }

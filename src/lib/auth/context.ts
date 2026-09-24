@@ -106,3 +106,12 @@ export function leadVisibilityFilter(ctx: AuthContext): { ownerId?: string } {
   if (ctx.permissions.includes(PERMISSIONS.LEADS_VIEW_ALL)) return {};
   return { ownerId: ctx.userId };
 }
+
+/**
+ * Deals follow the same rule as leads. The board applied it, but the deal
+ * mutations did not, so a rep could edit, move or delete a colleague's deal by
+ * id. Every deal lookup that precedes a write must include this.
+ */
+export function dealVisibilityFilter(ctx: AuthContext): { ownerId?: string } {
+  return leadVisibilityFilter(ctx);
+}

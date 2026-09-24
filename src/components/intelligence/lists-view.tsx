@@ -3,13 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Layers, RefreshCw, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Layers, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/ui/states";
-import { api } from "@/lib/api/client";
+import { ApiError, api, listsApi } from "@/lib/api/client";
+import { Input } from "@/components/ui/input";
+import { Field } from "@/components/ui/label";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatAge, formatNumber } from "@/lib/format";
 
 type ListRow = {
@@ -38,8 +41,10 @@ export function ListsView({ lists }: { lists: ListRow[] }) {
     setBusy(id);
     try {
       const res = await api.del<{ note: string }>(`/api/lists/${id}`);
-      setMessage(res.note);
+      setMessage(`${res.note} It is in the recycle bin if you need it back.`);
       router.refresh();
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : "Couldn't remove that list. Nothing was changed.");
     } finally {
       setBusy(null);
     }
@@ -47,6 +52,7 @@ export function ListsView({ lists }: { lists: ListRow[] }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
         <h1 className="text-lg font-semibold text-primary">Lists</h1>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
@@ -54,6 +60,8 @@ export function ListsView({ lists }: { lists: ListRow[] }) {
           someone put in it. They are shown apart because a stale set of forty and a current set
           of forty are not the same thing.
         </p>
+      </div>
+      <NewListButton onCreated={(note) => { setMessage(note); router.refresh(); }} />
       </div>
 
       {broken.length > 0 ? (
@@ -78,7 +86,8 @@ export function ListsView({ lists }: { lists: ListRow[] }) {
             <EmptyState
               icon={Layers}
               title="No lists yet"
-              description="Save a filter from the Leads screen to make a smart list, or gather leads by hand into a static one."
+              description="Create a static list here and add leads to it from the Leads screen, or filter Leads and choose Save as smart list."
+              action={<NewListButton onCreated={(note) => { setMessage(note); router.refresh(); }} />}
             />
           </CardContent>
         </Card>
@@ -132,6 +141,45 @@ export function ListsView({ lists }: { lists: ListRow[] }) {
         </>
       )}
     </div>
+  );
+}
+
+function NewListButton({ onCreated }: { onCreated: (note: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  async function submit() {
+    setPending(true); setError("");
+    try {
+      const r = await listsApi.create({ name: name.trim(), ...(description.trim() ? { description: description.trim() } : {}) });
+      setOpen(false); setName(""); setDescription(""); onCreated(r.note);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't create that list.");
+    } finally { setPending(false); }
+  }
+  return (
+    <>
+      <Button variant="primary" size="sm" onClick={() => setOpen(true)}><Plus />New list</Button>
+      <Dialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New static list</DialogTitle>
+            <DialogDescription>Add leads to it from the Leads screen with Add to list. For a list that fills itself, filter Leads and choose Save as smart list.</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-2">
+            <Field label="Name" htmlFor="list-name" required><Input id="list-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoFocus placeholder="Q4 NetSuite targets" /></Field>
+            <Field label="Description" htmlFor="list-desc"><Input id="list-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={400} /></Field>
+            {error ? <p className="text-xs text-danger-text">{error}</p> : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={pending} disabled={name.trim().length < 2} onClick={submit}>Create list</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

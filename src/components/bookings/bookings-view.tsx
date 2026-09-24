@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/states";
 import { api } from "@/lib/api/client";
 import { needsOutcomeRecorded } from "@/lib/bookings/outcome";
+import { BookingCardActions, NewMeetingButton } from "@/components/bookings/booking-dialog";
 import { cn } from "@/lib/utils";
 import { formatDateTime, formatInrCompact, formatNumber, formatRelative } from "@/lib/format";
 import { TIER } from "@/lib/vocab";
@@ -98,9 +99,11 @@ export function BookingsView({
   bookings,
   window: activeWindow,
   calendar,
+  bookingUrl = null,
 }: {
   bookings: Booking[];
   window: string;
+  bookingUrl?: string | null;
   calendar: {
     configured: boolean;
     provider: string | null;
@@ -114,12 +117,15 @@ export function BookingsView({
 
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <h1 className="text-lg font-semibold text-primary">Bookings</h1>
-        <p className="mt-0.5 max-w-2xl text-xs text-secondary">
-          Meetings kept alongside the lead, so the brief that makes the call land and the outcome
-          that moves the deal live in the same place.
-        </p>
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg font-semibold text-primary">Bookings</h1>
+          <p className="mt-0.5 max-w-2xl text-xs text-secondary">
+            Meetings kept alongside the lead, so the brief that makes the call land and the outcome
+            that moves the deal live in the same place.
+          </p>
+        </div>
+        <NewMeetingButton bookingUrl={bookingUrl} />
       </div>
 
       <CalendarBanner calendar={calendar} />
@@ -328,7 +334,8 @@ function BookingCard({
           </div>
         </button>
 
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {booking.state === "scheduled" && !booking.isPast ? <BookingCardActions booking={booking} /> : null}
           {booking.lead ? (
             <Badge variant="neutral" size="sm">
               <span className={TIER[booking.lead.tier as "A"]?.chip}>Tier {booking.lead.tier}</span>

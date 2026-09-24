@@ -837,7 +837,10 @@ describe("enrolling", () => {
     );
   });
 
-  it("refuses a lead who already replied", async () => {
+  it("refuses a stop-on-reply enrolment while nothing reads replies, even with a mailbox that sends", async () => {
+    // SMTP sends, but no reply reader is built (RECEIVE_BUILT), so stop-on-reply
+    // could not be honoured. The per-lead "already replied" rule behind this
+    // gate is covered in the sendability tests.
     withMailbox();
     const { ctx, workspace } = await freshWorkspace();
     const { lead } = await leadWithEmail(workspace.id, ctx.userId);
@@ -845,9 +848,9 @@ describe("enrolling", () => {
     const { sequence } = await createSequence(ctx, SEQ);
     await db.sequence.update({ where: { id: sequence.id }, data: { stopOnReply: true } });
 
-    await expect(enrollLeads(ctx, sequence.id, { leadIds: [lead.id] })).rejects.toThrow(
-      /already replied/
-    );
+    await expect(enrollLeads(ctx, sequence.id, { leadIds: [lead.id] })).rejects.toMatchObject({
+      code: "cannot_read_replies",
+    });
   });
 
   it("refuses an address that has opted out on the contact record", async () => {

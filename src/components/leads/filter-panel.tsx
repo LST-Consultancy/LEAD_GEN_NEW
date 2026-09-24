@@ -17,8 +17,8 @@ import {
   DrawerBody,
   DrawerFooter,
 } from "@/components/ui/drawer";
-import { INTENT_ORDER, INTENT, LEAD_STATUS, TIER, SIGNAL_TYPE_LABEL } from "@/lib/vocab";
-import type { LeadFilter } from "@/lib/leads/filter";
+import { INTENT_ORDER, INTENT, LEAD_STATUS, TIER, SIGNAL_TYPE_LABEL, SIGNAL_SOURCE_LABEL } from "@/lib/vocab";
+import { filterProblems, type LeadFilter } from "@/lib/leads/filter";
 import { cn } from "@/lib/utils";
 
 export type Facets = {
@@ -31,6 +31,9 @@ export type Facets = {
   technologies: string[];
   seniorities: string[];
   departments: string[];
+  countries?: string[];
+  tags?: string[];
+  sources?: string[];
 };
 
 type Draft = Partial<LeadFilter>;
@@ -209,6 +212,28 @@ export function FilterPanel({
                 />
               </Group>
 
+              {(facets.countries?.length ?? 0) > 1 ? (
+                <Group label="Country">
+                  <CheckList
+                    items={facets.countries!.map((c) => ({ value: c, label: c }))}
+                    selected={draft.countries ?? []}
+                    onToggle={(v) => toggleIn("countries", v)}
+                    scroll
+                  />
+                </Group>
+              ) : null}
+
+              {(facets.tags?.length ?? 0) > 0 ? (
+                <Group label="Company tag">
+                  <CheckList
+                    items={facets.tags!.map((t) => ({ value: t, label: t }))}
+                    selected={draft.tags ?? []}
+                    onToggle={(v) => toggleIn("tags", v)}
+                    scroll
+                  />
+                </Group>
+              ) : null}
+
               <Group label="Company size" hint="Employees">
                 <div className="flex items-center gap-2">
                   <Input
@@ -278,6 +303,16 @@ export function FilterPanel({
                 />
               </Group>
 
+              {(facets.sources?.length ?? 0) > 0 ? (
+                <Group label="Source" hint="Where the evidence came from">
+                  <CheckList
+                    items={facets.sources!.map((k) => ({ value: k, label: SIGNAL_SOURCE_LABEL[k] ?? k }))}
+                    selected={draft.sources ?? []}
+                    onToggle={(v) => toggleIn("sources", v as never)}
+                  />
+                </Group>
+              ) : null}
+
               <Separator />
 
               <Group label="Estimated value" hint="Rupees">
@@ -325,6 +360,16 @@ export function FilterPanel({
                         )
                       }
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="added-from">Added from</Label>
+                      <Input id="added-from" type="date" value={draft.surfacedFrom ?? ""} onChange={(e) => set("surfacedFrom", e.target.value || undefined)} />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor="added-to">Added to</Label>
+                      <Input id="added-to" type="date" value={draft.surfacedTo ?? ""} onChange={(e) => set("surfacedTo", e.target.value || undefined)} />
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="notcontacted">Not contacted for (days)</Label>
@@ -399,6 +444,11 @@ export function FilterPanel({
           </ScrollArea>
         </DrawerBody>
 
+        {filterProblems(draft).length ? (
+          <div role="alert" className="border-t border-warning-border bg-warning-subtle px-5 py-2 text-2xs text-warning-text">
+            {filterProblems(draft).map((p) => <p key={p}>{p} Nothing can match until it is fixed.</p>)}
+          </div>
+        ) : null}
         <DrawerFooter className="flex flex-row gap-2">
           <Button
             variant="ghost"
@@ -417,6 +467,7 @@ export function FilterPanel({
             variant="primary"
             size="sm"
             className="flex-1"
+            disabled={filterProblems(draft).length > 0}
             onClick={() => {
               onApply(draft);
               onOpenChange(false);

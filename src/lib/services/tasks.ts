@@ -63,6 +63,12 @@ function manualPriorityScore(
   };
 }
 
+/** An owner must be a current member of this workspace; a bare user id could belong to anyone. */
+async function assertMember(ctx: AuthContext, userId: string) {
+  const member = await db.workspaceMember.findFirst({ where: { workspaceId: ctx.workspaceId, userId, deletedAt: null }, select: { id: true } });
+  if (!member) throw new MutationError("That person is not a member of this workspace.", "not_a_member", 422);
+}
+
 export async function createTask(
   ctx: AuthContext,
   raw: z.input<typeof createTaskSchema>
@@ -82,6 +88,11 @@ export async function createTask(
       "That lead"
     );
   }
+
+  if (input.companyId) {
+    await loadScoped(() => db.company.findFirst({ where: { id: input.companyId, workspaceId: ctx.workspaceId, deletedAt: null }, select: { id: true } }), "That company");
+  }
+  if (input.ownerId) await assertMember(ctx, input.ownerId);
 
   let impactInr: number | null = null;
   if (input.dealId) {
@@ -211,6 +222,7 @@ export async function updateTask(
   if (!isOwn && !canManageOthers) {
     throw new MutationError("That task belongs to someone else.", "forbidden", 403);
   }
+  if (input.ownerId && input.ownerId !== task.ownerId) await assertMember(ctx, input.ownerId);
 
   return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
     const completing = input.status === "DONE" && task.status !== "DONE";
@@ -253,7 +265,9 @@ export async function updateTask(
         objectId: taskId,
         before: { status: task.status, lane: task.lane, ownerId: task.ownerId },
         after: { status: updated.status, lane: updated.lane, ownerId: updated.ownerId },
-        activity: completing
+        activity: input.ownerId && input.ownerId !== task.ownerId
+          ? { kind: "task.reassigned", summary: `Reassigned: ${updated.title} → ${updated.owner?.name ?? "someone"}`, leadId: task.leadId ?? undefined, companyId: task.companyId ?? undefined, dealId: task.dealId ?? undefined }
+          : completing
           ? {
               kind: "task.completed",
               summary: `Completed: ${updated.title}`,

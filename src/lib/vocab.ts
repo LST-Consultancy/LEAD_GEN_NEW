@@ -129,9 +129,63 @@ export const SCREEN_REASON_LABEL: Record<string, string> = {
   ai_unavailable: "not checked: AI unavailable",
 };
 
+/** Why a LinkedIn post is in review or was rejected. Each post has exactly one, so these sum to the funnel. */
+export const DISCOVERY_REASON: Record<string, { label: string; explain: string }> = {
+  // Needs review — kept, because a person could still qualify it.
+  ai_unavailable: { label: "AI buyer check did not run", explain: "The post reads as a buying request, but the AI buyer check was unavailable. Retry it, or name the buyer yourself." },
+  buyer_unresolved: { label: "Buyer not named", explain: "The post asks for help, but no organisation is named in it. The author's profile may say who they work for." },
+  date_unknown: { label: "Posting date unknown", explain: "The source gave no readable date, so it cannot be confirmed inside the search window." },
+  filter_unknown: { label: "Company details unknown", explain: "The post does not say the company's size, location or industry, so the search filters could not be checked. Unknown is not a match." },
+  // Rejected — set aside, with the rule that did it.
+  negative_keyword: { label: "Contains an excluded term", explain: "The post contains a term this search excludes." },
+  not_relevant: { label: "Off topic", explain: "The post does not mention the services or technologies searched for." },
+  outside_date_window: { label: "Outside the date range", explain: "Posted before the search's date range." },
+  job_seeker: { label: "Job seeker", explain: "Someone looking for work, not a company looking for a provider." },
+  seller_promotion: { label: "Seller promotion", explain: "A provider advertising its own services." },
+  internal_hiring: { label: "Employee vacancy", explain: "A job advert for an employee. Posts hiring an agency, freelancer or contractor are kept as buying requests." },
+  informational: { label: "No request", explain: "Discusses the topic but asks for nothing." },
+  filter_mismatch: { label: "Known filter mismatch", explain: "The post states a company size, location or industry that conflicts with the search filters." },
+  type_mismatch: { label: "Different kind of work (strict)", explain: "Strict filters are on and it asks for a different kind of work." },
+  filter_unknown_strict: { label: "Company details unknown (strict)", explain: "Strict filters are on, so a post without the company's size, location or industry is rejected rather than reviewed." },
+  previously_removed: { label: "Previously deleted", explain: "It belongs to an opportunity someone deleted, so the search does not bring it back." },
+};
+
+/** How a LinkedIn run ended, as a sentence fragment after "Stopped: ". */
+export const DISCOVERY_STOP: Record<string, string> = {
+  target_reached: "qualified-result target reached",
+  results_exhausted: "available results exhausted",
+  depth_limit: "search depth reached — more results may exist",
+  budget_posts: "post budget reached",
+  budget_runtime: "runtime limit reached",
+  cancelled: "cancelled",
+  rate_limited: "rate limit reached",
+  provider_error: "provider error",
+  no_queries: "no queries to run",
+};
+
+/** Why one query stopped paginating. */
+export const QUERY_END: Record<string, string> = {
+  exhausted: "no more results",
+  repeated_page: "repeated a page",
+  no_new_results: "nothing new",
+  date_window_end: "past the date range",
+  page_cap: "page limit",
+  provider_error: "failed",
+};
+
 export const BUYER_ATTRIBUTION_LABEL: Record<string, string> = {
   page_owner: "Buyer is the owner of the page making the request.",
   named_in_text: "Buyer named in the source text; the name and quote were checked word for word. The company's identity is not otherwise verified.",
+};
+
+/** A provider's readiness for one operation — see lib/services/capabilities.ts. */
+export const PROVIDER_STATE_LABEL: Record<string, string> = {
+  healthy: "Tested, working",
+  untested: "Connected, not tested",
+  failing: "Last test failed",
+  disabled: "Disabled",
+  missing_permission: "Needs licence confirmation",
+  missing_credentials: "Needs API key",
 };
 
 export const CHANNEL_LABEL: Record<string, string> = {
@@ -260,4 +314,20 @@ export const RISK_CLASS: Record<
     variant: "danger",
     rule: "Needs explicit approval unless Full Auto authorises it.",
   },
+};
+
+/** What kind of work an opportunity asks for. */
+export const OPPORTUNITY_TYPE_LABEL: Record<string, string> = {
+  INTERNAL_HIRING: "Hiring in-house",
+  EXTERNAL_VENDOR: "Looking for a vendor",
+  IMPLEMENTATION: "Implementation",
+  INTEGRATION: "Integration",
+  CONSULTING: "Consulting",
+  OUTSOURCING: "Outsourcing",
+  STAFF_AUGMENTATION: "Staff augmentation",
+  PROJECT: "Project",
+  RFP: "RFP / tender",
+  MIGRATION: "Migration",
+  DIGITAL_TRANSFORMATION: "Digital transformation",
+  UNKNOWN: "Not classified",
 };

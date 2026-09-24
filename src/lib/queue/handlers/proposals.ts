@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { isExpired, reconcile } from "@/lib/proposals/money";
+import { raiseNotification } from "@/lib/services/notify";
 
 /**
  * Moves proposals past their validity date into EXPIRED.
@@ -44,7 +45,7 @@ export async function expireProposals(workspaceId: string) {
   let notified = 0;
   for (const p of due) {
     if (!p.createdById) continue;
-    await db.notification.create({
+    await raiseNotification({
       data: {
         workspaceId,
         userId: p.createdById,
@@ -115,7 +116,7 @@ export async function auditProposalTotals(workspaceId: string) {
     if (!p.createdById) continue;
     // One notification per proposal per run; the condition persists until
     // someone re-saves, so repeating it daily is the point.
-    await db.notification.create({
+    await raiseNotification({
       data: {
         workspaceId,
         userId: p.createdById,

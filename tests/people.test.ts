@@ -71,14 +71,14 @@ afterAll(async () => {
 });
 
 describe("findPeople", () => {
-  it("states that it searched only the workspace when nothing is connected", async () => {
+  it("states that it searched only the workspace and where new people come from", async () => {
     const { ctx, workspace } = await freshWorkspace();
     await makePerson(workspace.id);
 
     const result = await findPeople(ctx);
     expect(result.externalSearchAvailable).toBe(false);
-    expect(result.scope).toMatch(/No discovery source is connected/);
-    expect(result.scope).toMatch(/cannot find people you do not already hold/);
+    expect(result.scope).toMatch(/already in your workspace/);
+    expect(result.scope).toMatch(/Find people/);
   });
 
   it("matches on name, title or company", async () => {

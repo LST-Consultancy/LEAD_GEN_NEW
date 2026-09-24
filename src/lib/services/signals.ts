@@ -2,6 +2,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
 import { hasIngestionSource } from "@/lib/ingest/sources";
+// Signals here come from search-phrase watching, which no provider feeds yet; discovered
+// opportunities are a separate record and have their own screens.
 import { SIGNAL_TYPE_LABEL } from "@/lib/vocab";
 
 /**
@@ -60,8 +62,8 @@ export async function getSignalFreshness(ctx: AuthContext) {
     notice: connected
       ? `${total} signals, ${last7} in the last week.`
       : total === 0
-        ? "No signals recorded, and no discovery source is connected to produce any."
-        : `${total} signals recorded, the newest ${ageHours !== null && ageHours < 48 ? `${ageHours} hours` : "some time"} old. No discovery source is connected, so this set is not growing — everything below is over data already here.`,
+        ? "No signals recorded yet. Search-phrase watching has no connected source; opportunities found by your connected providers are under Opportunities, and converting one to a lead records its evidence here."
+        : `${total} signals recorded, the newest ${ageHours !== null && ageHours < 48 ? `${ageHours} hours` : "some time"} old. Search-phrase watching has no connected source, so new signals arrive only when an opportunity is converted to a lead.`,
   };
 }
 
@@ -390,4 +392,26 @@ export async function getMarketIntelligence(ctx: AuthContext, opts: { days?: num
     caveat:
       "Computed from the companies, signals and deals in this workspace — it describes where your own pipeline is moving, not the market as a whole.",
   };
+}
+
+/**
+ * Watches that actually run today, as distinct from the signal watches above
+ * (which wait on a signal source that is not built). Opportunity watches are
+ * re-searched by the worker on their cadence; lead-search alerts are checked by
+ * the fifteen-minute notification sweep.
+ */
+export async function getRunningWatches(ctx: AuthContext) {
+  const rows = await db.savedSearch.findMany({
+    where: { workspaceId: ctx.workspaceId, deletedAt: null, alertEnabled: true, surface: { in: ["leads", "opportunities"] } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, name: true, surface: true, frequency: true, lastAlertAt: true, createdAt: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    kind: r.surface === "opportunities" ? ("opportunity" as const) : ("lead_search" as const),
+    frequency: r.frequency,
+    lastAlertAt: r.lastAlertAt?.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }

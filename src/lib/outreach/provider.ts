@@ -98,10 +98,27 @@ export function isEmailConfigured(): boolean {
   return activeEmailProvider() !== null;
 }
 
-/** Whether replies can be read, which gates sequence enrollment. */
+/**
+ * Which providers have a reply *reader* written — IMAP polling, a Gmail/Graph
+ * watch, or an inbound webhook. None does yet. `canReceive` on the descriptor
+ * says a provider could support reading; this says whether this app does.
+ * Treating the first as the second let a stop-on-reply sequence activate over
+ * SMTP while nothing read the mailbox, so replies stopped nothing unless a
+ * person logged them by hand.
+ */
+export const RECEIVE_BUILT: Record<EmailProviderName, boolean> = {
+  smtp: false,
+  resend: false,
+  ses: false,
+  postmark: false,
+  gmail: false,
+  outlook: false,
+};
+
+/** Whether replies are actually read automatically, which gates stop-on-reply sequences. */
 export function canReceiveReplies(): boolean {
   const active = activeEmailProvider();
-  return active !== null && EMAIL_PROVIDERS[active].canReceive;
+  return active !== null && EMAIL_PROVIDERS[active].canReceive && RECEIVE_BUILT[active];
 }
 
 export const EMAIL_NOT_CONFIGURED =

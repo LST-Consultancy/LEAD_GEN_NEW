@@ -17,6 +17,7 @@ import {
 import { POINT_COSTS, refundPoints, spendPoints } from "@/lib/services/points";
 import { enqueue } from "@/lib/queue/producer";
 import { JOB } from "@/lib/queue/jobs";
+import { titleAuthority } from "@/lib/opportunities/authority";
 
 /** Loads a lead the caller is allowed to act on, or throws a 404. */
 async function scopedLead(ctx: AuthContext, leadId: string) {
@@ -537,6 +538,71 @@ export async function overrideLeadScore(
           leadId,
           companyId: lead.companyId,
         },
+      },
+    };
+  });
+}
+
+/**
+ * Corrects the facts about the person behind a lead: name, current title,
+ * LinkedIn and city. Company is not editable here — a move to another company
+ * is a job change, not a typo, and would rewrite the lead's history.
+ *
+ * Authority is re-derived from the new title the same way discovery does it,
+ * so a corrected title cannot leave a stale "decision maker" flag behind.
+ */
+export const leadDetailsSchema = z.object({
+  fullName: z.string().trim().min(2, "A name needs at least two characters.").max(160).optional(),
+  title: z.string().trim().min(1).max(160).optional(),
+  linkedinUrl: z
+    .string().trim().max(400)
+    .refine((v) => v === "" || /^https:\/\/([a-z]{2,3}\.)?linkedin\.com\/in\/[^/?#\s]+\/?$/i.test(v), "That isn't a LinkedIn profile URL (https://www.linkedin.com/in/…).")
+    .transform((v) => v || null)
+    .nullable()
+    .optional(),
+  city: z.string().trim().max(120).transform((v) => v || null).nullable().optional(),
+});
+
+export async function updateLeadDetails(ctx: AuthContext, leadId: string, raw: z.input<typeof leadDetailsSchema>) {
+  const input = leadDetailsSchema.parse(raw);
+  const lead = await scopedLead(ctx, leadId);
+  if (Object.keys(input).length === 0) throw new MutationError("Nothing to change.", "nothing_to_change", 400);
+
+  if (input.linkedinUrl) {
+    const taken = await db.person.findFirst({ where: { workspaceId: ctx.workspaceId, linkedinUrl: input.linkedinUrl, deletedAt: null, id: { not: lead.personId } }, select: { fullName: true } });
+    if (taken) throw new MutationError(`That LinkedIn profile already belongs to ${taken.fullName} in this workspace. If they are the same person, keep that record instead.`, "duplicate_linkedin", 409);
+  }
+
+  return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
+    const person = await db.person.findUniqueOrThrow({ where: { id: lead.personId } });
+    const employment = await db.employment.findFirst({ where: { workspaceId: ctx.workspaceId, personId: lead.personId, companyId: lead.companyId, isCurrent: true } });
+    const before = { fullName: person.fullName, title: employment?.title ?? null, linkedinUrl: person.linkedinUrl, city: person.city };
+
+    const [firstName, ...rest] = (input.fullName ?? person.fullName).split(/\s+/);
+    await db.person.update({
+      where: { id: person.id },
+      data: {
+        ...(input.fullName ? { fullName: input.fullName, firstName, lastName: rest.join(" ") || null } : {}),
+        ...(input.linkedinUrl !== undefined ? { linkedinUrl: input.linkedinUrl } : {}),
+        ...(input.city !== undefined ? { city: input.city } : {}),
+      },
+    });
+    if (input.title) {
+      const { seniority, likelyDecisionMaker } = titleAuthority(input.title);
+      if (employment) await db.employment.update({ where: { id: employment.id }, data: { title: input.title, seniority, isDecisionMaker: likelyDecisionMaker } });
+      else await db.employment.create({ data: { workspaceId: ctx.workspaceId, personId: person.id, companyId: lead.companyId, title: input.title, seniority, isDecisionMaker: likelyDecisionMaker, isCurrent: true } });
+      // Seniority feeds the score.
+      await enqueue(JOB.RESCORE_LEAD, { workspaceId: ctx.workspaceId, leadId, reason: "title corrected" }, { dedupeKey: `rescore-lead-${leadId}` });
+    }
+    await touchLead(leadId);
+    const after = { fullName: input.fullName ?? before.fullName, title: input.title ?? before.title, linkedinUrl: input.linkedinUrl !== undefined ? input.linkedinUrl : before.linkedinUrl, city: input.city !== undefined ? input.city : before.city };
+    const changed = (Object.keys(after) as (keyof typeof after)[]).filter((k) => after[k] !== before[k]);
+
+    return {
+      result: toPlain({ id: leadId, ...after }),
+      log: {
+        action: "lead.details_updated", objectType: "Lead", objectId: leadId, before, after,
+        activity: changed.length ? { kind: "lead.details_updated", summary: `${after.fullName}: ${changed.map((k) => ({ fullName: "name", title: "title", linkedinUrl: "LinkedIn", city: "city" })[k]).join(", ")} corrected`, leadId, companyId: lead.companyId } : undefined,
       },
     };
   });

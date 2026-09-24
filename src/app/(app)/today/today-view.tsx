@@ -18,6 +18,7 @@ import {
 import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 type Layout = "classic" | "mission";
@@ -32,7 +33,9 @@ export function TodayView({
   firstName,
   data,
   initialLayout,
+  demand,
 }: {
+  demand?: { total: number; types: { type: string; opportunities: number; companies: number }[] };
   greeting: string;
   firstName: string;
   data: {
@@ -50,6 +53,7 @@ export function TodayView({
   };
   initialLayout: Layout;
 }) {
+  const router = useRouter();
   const [layout, setLayout] = React.useState<Layout>(initialLayout);
   const [motion, setMotion] = React.useState(data.motion);
   const [motionPending, setMotionPending] = React.useState(false);
@@ -128,11 +132,7 @@ export function TodayView({
             greeting={greeting}
             firstName={firstName}
             brief={data.brief}
-            onStartSession={() =>
-              toast("Focus mode lands with My Queue", {
-                description: "It will walk you through the worklist one item at a time.",
-              })
-            }
+            onStartSession={() => router.push("/my-queue?focus=1")}
           />
           <AiDailyPriority brief={data.dailyBrief} />
 
@@ -151,7 +151,7 @@ export function TodayView({
               <RevenueInMotion motion={motion} onPeriodChange={changePeriod} pending={motionPending} />
               <MorningBriefing changes={data.brief.totalChanges} />
               <StickyNotes notes={data.notes} />
-              <DemandIndexTeaser />
+              <DemandIndexTeaser demand={demand} />
             </div>
           </div>
         </div>
@@ -162,11 +162,7 @@ export function TodayView({
             greeting={greeting}
             firstName={firstName}
             brief={data.brief}
-            onStartSession={() =>
-              toast("Focus mode lands with My Queue", {
-                description: "It will walk you through the worklist one item at a time.",
-              })
-            }
+            onStartSession={() => router.push("/my-queue?focus=1")}
           />
           <AiDailyPriority brief={data.dailyBrief} />
 
@@ -189,7 +185,7 @@ export function TodayView({
               <WhileYouSlept digest={data.digest} />
               <AiSalesCoach coach={data.coach} />
               <MorningBriefing changes={data.brief.totalChanges} />
-              <DemandIndexTeaser />
+              <DemandIndexTeaser demand={demand} />
             </div>
           </div>
         </div>

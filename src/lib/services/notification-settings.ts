@@ -1,15 +1,16 @@
 import "server-only";
 import { db } from "@/lib/db";
 import type { AuthContext } from "@/lib/auth/context";
+import type { NotificationKind } from "@/generated/prisma/client";
+import { MutationError } from "./mutate";
+import { recordAudit } from "./audit";
 
 /**
  * §85 — notifications.
  *
- * There is no per-kind preference store, so this screen reports what actually
- * fires rather than offering switches that save nowhere. The useful thing it
- * can say is how noisy each kind has *been* for you — a kind you would want to
- * mute is one that has fired forty times this month, and that is knowable
- * without a preferences table.
+ * Per-kind in-app muting, stored per user per workspace and honoured by
+ * `raiseNotification`, shown beside how noisy each kind has *been* — a kind you
+ * would want to mute is one that has fired forty times this month.
  */
 
 /** What each kind means and what raises it. Kept out of the enum, per `vocab`. */
@@ -29,7 +30,7 @@ export const NOTIFICATION_KIND: Record<
   },
   LEAD_SIGNAL: {
     label: "Lead signal",
-    raisedBy: "A watched phrase matches something about a lead you own.",
+    raisedBy: "New leads match a saved search you alert on, or an opportunity watch finds new matches.",
     actionable: true,
   },
   DEAL_RISK: {
@@ -88,6 +89,8 @@ export type NotificationKindStat = {
   received: number;
   unread: number;
   lastAt: string | null;
+  /** Muted in-app for you in this workspace. */
+  muted: boolean;
 };
 
 const WINDOW_DAYS = 30;
@@ -101,7 +104,7 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000);
   const where = { workspaceId: ctx.workspaceId, userId: ctx.userId, createdAt: { gte: since } };
 
-  const [grouped, unreadGrouped, latest] = await Promise.all([
+  const [grouped, unreadGrouped, latest, prefs] = await Promise.all([
     db.notification.groupBy({ by: ["kind"], where, _count: { _all: true } }),
     db.notification.groupBy({
       by: ["kind"],
@@ -109,6 +112,7 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
       _count: { _all: true },
     }),
     db.notification.groupBy({ by: ["kind"], where, _max: { createdAt: true } }),
+    db.notificationPreference.findMany({ where: { workspaceId: ctx.workspaceId, userId: ctx.userId, inApp: false }, select: { kind: true } }),
   ]);
 
   const kinds = Object.keys(NOTIFICATION_KIND)
@@ -123,6 +127,7 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
         received,
         unread: unreadGrouped.find((g) => g.kind === kind)?._count._all ?? 0,
         lastAt: latest.find((g) => g.kind === kind)?._max.createdAt?.toISOString() ?? null,
+        muted: prefs.some((p) => p.kind === kind),
       };
     })
     // Noisiest first: the whole point is to find what you would want to mute.
@@ -134,4 +139,17 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
     totalReceived: kinds.reduce((n, k) => n + k.received, 0),
     totalUnread: kinds.reduce((n, k) => n + k.unread, 0),
   };
+}
+
+/** Mutes or unmutes one kind of in-app notification for the caller. */
+export async function setNotificationMuted(ctx: AuthContext, kind: string, muted: boolean) {
+  if (!(kind in NOTIFICATION_KIND)) throw new MutationError("That isn't a notification kind.", "unknown_kind", 422);
+  const k = kind as NotificationKind;
+  await db.notificationPreference.upsert({
+    where: { workspaceId_userId_kind: { workspaceId: ctx.workspaceId, userId: ctx.userId, kind: k } },
+    create: { workspaceId: ctx.workspaceId, userId: ctx.userId, kind: k, inApp: !muted },
+    update: { inApp: !muted },
+  });
+  await recordAudit(ctx, { action: muted ? "notifications.muted" : "notifications.unmuted", objectType: "NotificationPreference", after: { kind } });
+  return { kind, muted };
 }

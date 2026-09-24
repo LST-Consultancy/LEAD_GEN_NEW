@@ -2,12 +2,13 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
+import { type AuthContext, dealVisibilityFilter, leadVisibilityFilter } from "@/lib/auth/context";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate, softDelete } from "@/lib/services/mutate";
 import { computeTotals, reconcile, isExpired, daysUntilExpiry } from "@/lib/proposals/money";
 import { isEmailConfigured, activeEmailProvider, EMAIL_NOT_CONFIGURED } from "@/lib/outreach/provider";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 const itemSchema = z.object({
   name: z.string().trim().min(1, "Every line needs a name.").max(200),
@@ -153,6 +154,48 @@ export async function getProposal(ctx: AuthContext, id: string) {
   };
 }
 
+/**
+ * A proposal's lead and deal must be this workspace's, visible to the author,
+ * and at the proposal's company. Checked on create *and* update: before this,
+ * `dealId` was never checked at all, so a proposal could be linked to another
+ * tenant's deal by id.
+ */
+async function assertLinks(ctx: AuthContext, input: { companyId: string; leadId?: string; dealId?: string }) {
+  if (input.leadId) {
+    const lead = await loadScoped(() => db.lead.findFirst({ where: { id: input.leadId, workspaceId: ctx.workspaceId, deletedAt: null, ...leadVisibilityFilter(ctx) }, select: { companyId: true } }), "That lead");
+    if (lead.companyId !== input.companyId) throw new MutationError("That lead works at a different company from this proposal.", "lead_company_mismatch", 422);
+  }
+  if (input.dealId) {
+    const deal = await loadScoped(() => db.deal.findFirst({ where: { id: input.dealId, workspaceId: ctx.workspaceId, deletedAt: null, ...dealVisibilityFilter(ctx) }, select: { companyId: true } }), "That deal");
+    if (deal.companyId !== input.companyId) throw new MutationError("That deal is with a different company from this proposal.", "deal_company_mismatch", 422);
+  }
+}
+
+/**
+ * What the editor needs to start a proposal: the company, its leads and open
+ * deals the author can see, and the norms existing proposals actually use.
+ */
+export async function proposalStartingPoint(ctx: AuthContext, opts: { leadId?: string; companyId?: string; dealId?: string }) {
+  let companyId = opts.companyId;
+  if (opts.leadId) {
+    const lead = await db.lead.findFirst({ where: { id: opts.leadId, workspaceId: ctx.workspaceId, deletedAt: null, ...leadVisibilityFilter(ctx) }, select: { companyId: true } });
+    if (!lead) return null;
+    companyId = lead.companyId;
+  } else if (opts.dealId) {
+    const deal = await db.deal.findFirst({ where: { id: opts.dealId, workspaceId: ctx.workspaceId, deletedAt: null, ...dealVisibilityFilter(ctx) }, select: { companyId: true } });
+    if (!deal) return null;
+    companyId = deal.companyId;
+  }
+  if (!companyId) return { company: null, leads: [], deals: [] };
+  const company = await db.company.findFirst({ where: { id: companyId, workspaceId: ctx.workspaceId, deletedAt: null }, select: { id: true, name: true } });
+  if (!company) return null;
+  const [leads, deals] = await Promise.all([
+    db.lead.findMany({ where: { workspaceId: ctx.workspaceId, companyId, deletedAt: null, ...leadVisibilityFilter(ctx) }, select: { id: true, person: { select: { fullName: true } } }, take: 50 }),
+    db.deal.findMany({ where: { workspaceId: ctx.workspaceId, companyId, deletedAt: null, status: "OPEN", ...dealVisibilityFilter(ctx) }, select: { id: true, title: true, valueInr: true }, take: 50 }),
+  ]);
+  return toPlain({ company, leads: leads.map((l) => ({ id: l.id, name: l.person.fullName })), deals: deals.map((d) => ({ id: d.id, title: d.title, valueInr: Number(d.valueInr) })) });
+}
+
 export async function createProposal(ctx: AuthContext, raw: ProposalInput) {
   const input = proposalSchema.parse(raw);
 
@@ -165,21 +208,7 @@ export async function createProposal(ctx: AuthContext, raw: ProposalInput) {
     "That company"
   );
 
-  if (input.leadId) {
-    await loadScoped(
-      () =>
-        db.lead.findFirst({
-          where: {
-            id: input.leadId,
-            workspaceId: ctx.workspaceId,
-            deletedAt: null,
-            ...leadVisibilityFilter(ctx),
-          },
-          select: { id: true },
-        }),
-      "That lead"
-    );
-  }
+  await assertLinks(ctx, input);
 
   if (input.validUntil && isExpired(input.validUntil, new Date(), ctx.workspace.timezone)) {
     throw new MutationError(
@@ -268,6 +297,8 @@ export async function updateProposal(ctx: AuthContext, id: string, raw: Proposal
       409
     );
   }
+  // The company is fixed once drafted; links are re-checked against it.
+  await assertLinks(ctx, { companyId: existing.companyId, leadId: input.leadId, dealId: input.dealId });
 
   const totals = computeTotals(input.items, input.taxRate);
   const wasSent = existing.sentAt !== null;
@@ -491,6 +522,7 @@ export async function recordProposalDecision(
           ? { state: "ACCEPTED", acceptedAt: now }
           : { state: "DECLINED", declinedAt: now, terms: proposal.terms },
     });
+    if (input.decision === "accept") await emitWebhookEvent(ctx.workspaceId, "proposal.accepted", { proposalId: id, totalInr: Number(updated.totalInr), via: "team" });
 
     return {
       result: {

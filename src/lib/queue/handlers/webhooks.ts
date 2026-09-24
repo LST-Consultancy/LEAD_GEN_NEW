@@ -1,6 +1,8 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db";
+import { enqueue } from "@/lib/queue/producer";
+import { JOB } from "@/lib/queue/jobs";
 
 /**
  * §85 — signed webhook delivery with retries.
@@ -147,4 +149,29 @@ export async function deliverWebhook(workspaceId: string, deliveryId: string) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Deliveries recorded but never attempted — created while the queue was down,
+ * so no job was ever enqueued for them. Attempted deliveries are left to the
+ * job's own retry policy. Safe to repeat: the job id is the delivery id, so a
+ * delivery already queued is not queued twice, and delivered ones are skipped.
+ */
+export async function requeueStrandedDeliveries(workspaceId: string) {
+  const now = Date.now();
+  const stranded = await db.webhookDelivery.findMany({
+    where: {
+      workspaceId, deliveredAt: null, statusCode: null, error: null, attempt: 1,
+      createdAt: { lt: new Date(now - 5 * 60_000), gt: new Date(now - 7 * 86_400_000) },
+      webhook: { isActive: true, deletedAt: null },
+    },
+    select: { id: true },
+    take: 500,
+  });
+  let queued = 0;
+  for (const d of stranded) {
+    const r = await enqueue(JOB.DELIVER_WEBHOOK, { workspaceId, deliveryId: d.id }, { dedupeKey: `webhook-${d.id}`, dedupeWindowSec: 0 });
+    if (r.queued) queued++;
+  }
+  return { workspaceId, stranded: stranded.length, queued };
 }

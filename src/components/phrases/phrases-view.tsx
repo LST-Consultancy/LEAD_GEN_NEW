@@ -184,11 +184,10 @@ export function PhrasesView({
             <p className="flex items-start gap-2 text-xs leading-relaxed text-warning-text">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                <strong>No ingestion source is connected</strong>, so these phrases are not
-                currently fetching anything. The configuration, scheduling and per-phrase
-                attribution below are all real and working — but discovering new signals needs a
-                licensed dataset, job-board feed or tender-portal connection, and none is set up.
-                Everything you see is attribution over data already in the workspace.
+                <strong>Search phrases are not fetched by any provider yet</strong>, so these do
+                not discover anything on their own. Your connected providers run from Find
+                Opportunities — save a watch there to monitor for new demand. Scheduling and
+                per-phrase attribution below still work over data already in the workspace.
               </span>
             </p>
           </CardContent>

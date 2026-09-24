@@ -12,11 +12,14 @@ import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/ui/states";
 import { api } from "@/lib/api/client";
 import { formatAge, formatNumber } from "@/lib/format";
+import { buildLeadQuery } from "@/lib/leads/params";
+import type { LeadFilter } from "@/lib/leads/filter";
 
 type Saved = {
   id: string;
   name: string;
   surface: string;
+  filter: unknown;
   alertEnabled: boolean;
   frequency: string;
   lastAlertAt: string | null;
@@ -25,6 +28,14 @@ type Saved = {
   broken: boolean;
   countable: boolean;
 };
+
+/** Opens the search with its stored filter restored, not just the screen it came from. */
+function searchHref(s: Pick<Saved, "surface" | "filter" | "broken">): string {
+  if (s.surface === "leads") return s.broken ? "/leads" : `/leads${buildLeadQuery((s.filter ?? {}) as Partial<LeadFilter>)}`;
+  // Opportunity watches run on a schedule; Find Opportunities is where they are made and re-run.
+  if (s.surface === "opportunities") return "/find-leads";
+  return `/${s.surface}`;
+}
 
 export function AlertsView({
   searches,
@@ -118,7 +129,7 @@ export function AlertsView({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Link
-                        href={`/${s.surface === "leads" ? "leads" : s.surface}`}
+                        href={searchHref(s)}
                         className="text-xs font-medium text-primary hover:underline"
                       >
                         {s.name}

@@ -29,11 +29,13 @@ npm install
 psql -U postgres -c "CREATE ROLE signalroom LOGIN PASSWORD 'signalroom_dev_pw' CREATEDB"
 psql -U postgres -c "CREATE DATABASE signalroom_dev OWNER signalroom"
 psql -U postgres -c "CREATE DATABASE signalroom_shadow OWNER signalroom"
+psql -U postgres -c "CREATE DATABASE signalroom_test OWNER signalroom"
 
 cp .env.example .env          # then set AUTH_SECRET to 32+ random characters
 npx prisma migrate deploy     # or `npm run db:migrate` in development
 npx prisma generate
-npm run db:seed
+npm run db:seed               # demo data; refuses if the database holds real accounts
+npm run db:test:prepare       # migrate + seed signalroom_test, used by npm test and e2e
 
 npm run dev
 ```

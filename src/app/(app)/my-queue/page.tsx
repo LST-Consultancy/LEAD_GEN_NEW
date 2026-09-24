@@ -8,11 +8,11 @@ export const metadata: Metadata = { title: "My Queue" };
 export default async function MyQueuePage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; focus?: string }>;
 }) {
   const ctx = await requireAuth();
   const queue = await getMyQueue(ctx);
-  const tab = (await searchParams).tab;
+  const { tab, focus } = await searchParams;
 
   const initialTab =
     tab === "needs-you"
@@ -21,7 +21,9 @@ export default async function MyQueuePage({
         ? "WORKING"
         : tab === "done"
           ? "DONE"
-          : queue.counts.NEEDS_ATTENTION > 0
+          : tab === "queued"
+            ? "QUEUED"
+            : queue.counts.NEEDS_ATTENTION > 0
             ? "NEEDS_ATTENTION"
             : "QUEUED";
 
@@ -32,6 +34,7 @@ export default async function MyQueuePage({
       summary={queue.summary}
       focusOrder={queue.focusOrder}
       initialTab={initialTab}
+      initialFocus={focus === "1"}
     />
   );
 }

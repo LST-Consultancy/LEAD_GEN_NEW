@@ -35,7 +35,11 @@ import {
 
 export const draftInputSchema = z.object({
   leadId: z.string().uuid(),
-  channel: z.enum(["email", "whatsapp", "linkedin"]),
+  channel: z.enum(["email", "whatsapp", "linkedin", "call"]),
+  /** English unless asked otherwise; the screen says which was used. */
+  language: z.enum(["en", "hinglish", "hi"]).default("en"),
+  /** Draft a reply in this thread instead of a first message. Must belong to the lead. */
+  conversationId: z.string().uuid().optional(),
   /** An angle the sender wants taken. Optional; the grounding still binds it. */
   angle: z.string().trim().max(200).optional(),
 });
@@ -46,6 +50,7 @@ export type DraftResult =
   | {
       ok: true;
       channel: DraftChannel;
+      language: "en" | "hinglish" | "hi";
       subject: string | null;
       body: string;
       /** Which grounding headings the draft drew on, as it reported them. */
@@ -103,6 +108,19 @@ export async function draftOutreach(ctx: AuthContext, raw: DraftInput): Promise<
   });
 
   const grounding = assembleGrounding(lead, knowledge);
+
+  if (input.conversationId) {
+    const convo = await db.conversation.findFirst({
+      where: { id: input.conversationId, workspaceId: ctx.workspaceId, leadId: lead.id, deletedAt: null },
+      include: { messages: { orderBy: { createdAt: "desc" }, take: 6, select: { direction: true, body: true } } },
+    });
+    if (!convo) return { ok: false, code: "lead_not_found", reason: "That conversation doesn't belong to this lead, or you can't see it. Nothing was generated." };
+    const lines = convo.messages.reverse().map((m) => `${m.direction === "INBOUND" ? "Them" : "You"}: ${m.body.replace(/\s+/g, " ").slice(0, 600)}`);
+    if (!convo.messages.some((m) => m.direction === "INBOUND")) {
+      return { ok: false, code: "no_grounding", reason: "Nothing has come back from them in this thread, so there is nothing to reply to. Use a first-message draft instead." };
+    }
+    grounding.push({ heading: "The conversation so far", lines });
+  }
   const aboutThem = grounding.find((s) => s.heading === "About this prospect");
   const whatWeSell = grounding.find((s) => s.heading === "What you sell");
 
@@ -124,7 +142,7 @@ export async function draftOutreach(ctx: AuthContext, raw: DraftInput): Promise<
     {
       feature: "draft_outreach",
       system: SYSTEM_PROMPT,
-      prompt: buildDraftPrompt({ channel: input.channel, sections: grounding, angle: input.angle }),
+      prompt: buildDraftPrompt({ channel: input.channel, sections: grounding, angle: input.angle, language: input.language }),
       maxTokens: 3000,
       // Measured provider latency for this prompt swings between about 7
       // seconds and several minutes. A minute is the point where waiting
@@ -167,6 +185,7 @@ export async function draftOutreach(ctx: AuthContext, raw: DraftInput): Promise<
     objectId: lead.id,
     after: {
       channel: input.channel,
+      language: input.language,
       model: completion.model,
       groundedOn: parsed.groundedOn,
       withheld: parsed.withheld,
@@ -177,6 +196,7 @@ export async function draftOutreach(ctx: AuthContext, raw: DraftInput): Promise<
   return {
     ok: true,
     channel: input.channel,
+    language: input.language,
     subject: parsed.subject,
     body: parsed.body,
     groundedOn: parsed.groundedOn,

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/ui/states";
+import { CompetitorEditorButton, RemoveCompetitorButton } from "@/components/intelligence/competitor-editor";
 import { SignalNotice } from "@/components/intelligence/signal-notice";
 import { formatAge } from "@/lib/format";
 
@@ -33,7 +34,9 @@ export function CompetitorsView({
   competitors,
   untracked,
   freshness,
+  canManage = false,
 }: {
+  canManage?: boolean;
   competitors: Competitor[];
   untracked: number;
   freshness: { connected: boolean; notice: string };
@@ -43,7 +46,10 @@ export function CompetitorsView({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-lg font-semibold text-primary">Competitors</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="flex-1 text-lg font-semibold text-primary">Competitors</h1>
+          {canManage ? <CompetitorEditorButton label="Track a competitor" /> : null}
+        </div>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
           Who gets named in the signals you have — switching, dissatisfaction and comparison, in
           the prospect&apos;s own words rather than a battlecard&apos;s.
@@ -68,6 +74,7 @@ export function CompetitorsView({
               icon={Swords}
               title="No competitors tracked"
               description="Add the names and aliases you compete against, and any signal mentioning them is matched here — including the ones that arrived for another reason."
+              action={canManage ? <CompetitorEditorButton label="Track your first competitor" /> : <p className="text-2xs text-muted">Ask someone who manages the knowledge base to add them.</p>}
             />
           </CardContent>
         </Card>
@@ -92,6 +99,12 @@ export function CompetitorsView({
                   {c.notes ? <p className="mt-0.5 text-2xs text-secondary">{c.notes}</p> : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-3 text-right">
+                  {canManage ? (
+                    <span className="flex items-center">
+                      <CompetitorEditorButton label="Edit" initial={{ id: c.id, name: c.name, domain: c.domain, aliases: c.aliases, notes: c.notes }} />
+                      <RemoveCompetitorButton id={c.id} name={c.name} />
+                    </span>
+                  ) : null}
                   <div>
                     <p className="text-2xs text-muted">Mentions</p>
                     <p className="text-sm font-semibold tabular text-primary">{c.mentionCount}</p>

@@ -399,6 +399,8 @@ function ThreadPane({
   startTransition: (cb: () => void) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  const [draftNote, setDraftNote] = useState<string | null>(null);
   const [result, setResult] = useState<{ sent: boolean; note: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [suppressOpen, setSuppressOpen] = useState(false);
@@ -446,6 +448,24 @@ function ThreadPane({
       });
     } finally {
       setBusy(false);
+    }
+  };
+
+  // A reply drafted from the thread and the lead's evidence. Filled in for
+  // review; nothing is sent until someone presses Send.
+  const draftReply = async () => {
+    if (!detail.lead) return;
+    setDrafting(true);
+    setDraftNote(null);
+    try {
+      const channel = ({ EMAIL: "email", WHATSAPP: "whatsapp", LINKEDIN: "linkedin" } as Record<string, string>)[detail.channel] ?? "email";
+      const res = await api.post<{ body: string; groundedOn: string[]; withheld: string | null }>("/api/draft", { leadId: detail.lead.id, channel, conversationId: detail.id });
+      setDraft(res.body);
+      setDraftNote(`Drafted from: ${res.groundedOn.join(", ") || "nothing reported"}.${res.withheld ? ` Held back: ${res.withheld}` : ""} Read it before sending.`);
+    } catch (err) {
+      setDraftNote(err instanceof Error ? err.message : "No draft came back. Nothing was changed.");
+    } finally {
+      setDrafting(false);
     }
   };
 
@@ -554,7 +574,14 @@ function ThreadPane({
             disabled={!lastAddress}
             className="w-full resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-primary placeholder:text-muted focus:border-accent focus:outline-none disabled:opacity-60"
           />
+          {draftNote ? <p className="text-2xs text-muted">{draftNote}</p> : null}
           <div className="flex flex-wrap items-center gap-2">
+            {detail.lead ? (
+              <Button size="sm" variant="secondary" loading={drafting} disabled={busy} onClick={() => void draftReply()}>
+                <Sparkles />
+                Draft reply
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="primary"

@@ -5,6 +5,8 @@ import { parseOpportunityQuery, criteriaSchema } from "@/lib/opportunities/query
 import { enqueue } from "@/lib/queue/producer";
 import { JOB } from "@/lib/queue/jobs";
 import { z } from "zod";
+import type { Prisma } from "@/generated/prisma/client";
+import { parseDiscoveryOptions } from "@/lib/opportunities/linkedin-plan";
 export async function refreshOpportunityWatches(workspaceId: string) {
   await db.discoveryCandidate.deleteMany({ where: { workspaceId, expiresAt: { lte: new Date() } } });
   // Purge source text when its licensed retention window ends, including derived versions.
@@ -26,11 +28,11 @@ export async function refreshOpportunityWatches(workspaceId: string) {
     if (!watch.createdById) continue;
     const member = await db.workspaceMember.findFirst({ where: { workspaceId, userId: watch.createdById, deletedAt: null }, include: { role: true } });
     if (!member?.role.permissions.includes("leads.edit")) continue;
-    const parsed = z.object({ query: z.string().min(3).max(2000), providers: z.array(z.enum(DISCOVERY_PROVIDERS)), cadenceHours: z.number().int().min(6).max(168), criteria: criteriaSchema.optional() }).safeParse(watch.filterJson);
+    const parsed = z.object({ query: z.string().min(3).max(2000), providers: z.array(z.enum(DISCOVERY_PROVIDERS)), cadenceHours: z.number().int().min(6).max(168), criteria: criteriaSchema.optional(), options: z.unknown().optional() }).safeParse(watch.filterJson);
     if (!parsed.success) continue;
     const bucket = Math.floor(Date.now() / (parsed.data.cadenceHours * 3600000));
     const idempotencyKey = `watch:${watch.id}:${bucket}`;
-    const search = await db.opportunitySearch.upsert({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } }, create: { workspaceId, createdById: watch.createdById, savedSearchId: watch.id, query: parsed.data.query, criteria: parsed.data.criteria ?? parseOpportunityQuery(parsed.data.query), providers: parsed.data.providers, idempotencyKey }, update: {} });
+    const search = await db.opportunitySearch.upsert({ where: { workspaceId_idempotencyKey: { workspaceId, idempotencyKey } }, create: { workspaceId, createdById: watch.createdById, savedSearchId: watch.id, query: parsed.data.query, criteria: parsed.data.criteria ?? parseOpportunityQuery(parsed.data.query), providers: parsed.data.providers, options: parseDiscoveryOptions(parsed.data.options) as Prisma.InputJsonValue, idempotencyKey }, update: {} });
     if (search.state !== "QUEUED") continue;
     const result = await enqueue(JOB.OPPORTUNITY_DISCOVERY, { workspaceId, searchId: search.id }, { dedupeKey: search.id, dedupeWindowSec: 0 });
     if (result.queued) queued++;

@@ -2,11 +2,12 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AlertTriangle, Clock, FileText, GripVertical, ListChecks } from "lucide-react";
+import { AlertTriangle, Clock, FileText, GripVertical, ListChecks, Pencil } from "lucide-react";
 import { Avatar, CompanyAvatar } from "@/components/ui/avatar";
 import { Tooltip } from "@/components/ui/tooltip";
 import { IntentBadge, ScorePill, TierBadge } from "@/components/domain/indicators";
-import { formatAge, formatDate, formatInrCompact } from "@/lib/format";
+import { formatDate, formatInrCompact, formatRelative } from "@/lib/format";
+import { EditDealContext } from "@/components/pipeline/deal-edit-dialog";
 import type { IntentKey, TierKey } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +76,7 @@ export function DealCard({
   setNodeRef?: (el: HTMLElement | null) => void;
   style?: React.CSSProperties;
 }) {
+  const openEditor = React.useContext(EditDealContext);
   const highRisk = deal.risks.some((r) => r.severity === "high");
   const hasRisk = deal.risks.length > 0;
 
@@ -122,6 +124,16 @@ export function DealCard({
           <span className="shrink-0 text-xs font-semibold text-primary tabular">
             {formatInrCompact(deal.valueInr)}
           </span>
+          {openEditor && !overlay ? (
+            <button
+              type="button"
+              onClick={() => openEditor(deal.id)}
+              aria-label={`Edit ${deal.title}`}
+              className="shrink-0 rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-primary focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <Pencil className="size-3" />
+            </button>
+          ) : null}
         </div>
 
         {/* Lead attribution */}
@@ -151,7 +163,7 @@ export function DealCard({
             <Clock className="size-2.5 shrink-0" />
             <span className="truncate">{deal.nextActionLabel}</span>
             {deal.nextActionAt ? (
-              <span className="shrink-0 text-muted">· {formatAge(deal.nextActionAt)}</span>
+              <span className="shrink-0 text-muted">· {formatRelative(deal.nextActionAt)}</span>
             ) : null}
           </p>
         ) : deal.status === "OPEN" ? (

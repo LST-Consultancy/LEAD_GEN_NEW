@@ -74,10 +74,10 @@ export function LeadLensView({ enrichmentAvailable }: { enrichmentAvailable: boo
       {!enrichmentAvailable ? (
         <div className="rounded-lg border border-warning-border bg-warning-surface px-3 py-2 text-xs text-warning-text">
           <ShieldOff className="mr-1 inline size-3.5" />
-          <strong>This looks up what you already hold.</strong> On-demand enrichment — building a
-          dossier for someone you have never seen — needs a licensed data provider, and none is
-          connected. A miss below means the person is not in your data, not that they do not
-          exist.
+          <strong>This looks up what you already hold.</strong> Looking up someone you have
+          never seen is not built yet. To find new people at a company, open one of its
+          opportunities and use Find people. A miss below means the person is not in your data,
+          not that they do not exist.
         </div>
       ) : null}
 

@@ -10,12 +10,12 @@
  */
 
 import "dotenv/config";
-import { Worker, type Job } from "bullmq";
+import { UnrecoverableError, Worker, type Job } from "bullmq";
 import { getRedis, isQueueConfigured } from "@/lib/queue/connection";
-import { QUEUE_NAME, JOB, JOB_LABEL, type JobName, type JobPayload } from "@/lib/queue/jobs";
+import { QUEUE_NAME, JOB, JOB_LABEL, JobEnvelopeError, schedulerIdOfJob, type JobName, type JobPayload } from "@/lib/queue/jobs";
 import { judgeSearchJob } from "@/lib/opportunities/search-status";
 import { failOpportunitySearch } from "@/lib/services/opportunity-ingestion";
-import { installSchedules } from "@/lib/queue/producer";
+import { installSchedules, removeSchedule, removeStaleSchedules } from "@/lib/queue/producer";
 import { runJob } from "@/lib/queue/router";
 import { db } from "@/lib/db";
 
@@ -60,6 +60,10 @@ async function main() {
     workspaces: workspaces.length,
     schedulers: installed,
   });
+  // Deleted workspaces and the old `name:workspace` id format left schedules
+  // that fired hollow jobs ("Job undefined received no workspaceId").
+  const removed = await removeStaleSchedules(workspaces.map((w) => w.id));
+  if (removed.length) log("warn", "stale schedules removed", { count: removed.length, ids: removed });
 
   const worker = new Worker(
     QUEUE_NAME,
@@ -68,7 +72,7 @@ async function main() {
       log("info", "job started", { jobId: job.id, job: job.name, attempt: job.attemptsMade + 1 });
 
       try {
-        const result = await runJob(job.name as JobName, job.data ?? {});
+        const result = await runJob(job.name, job.data, job.id);
         log("info", "job finished", {
           jobId: job.id,
           job: job.name,
@@ -84,6 +88,14 @@ async function main() {
           durationMs: Date.now() - started,
           error: (err as Error).message,
         });
+        if (err instanceof JobEnvelopeError) {
+          if (err.code === "workspace_gone" || err.code === "no_payload") {
+            const scheduler = schedulerIdOfJob(job.id);
+            if (scheduler && (await removeSchedule(scheduler))) log("warn", "stale schedule removed", { scheduler });
+          }
+          // A malformed job fails once; retrying cannot supply what is missing.
+          throw new UnrecoverableError(err.message);
+        }
         // Rethrown so BullMQ applies the configured backoff and retry count.
         throw err;
       }

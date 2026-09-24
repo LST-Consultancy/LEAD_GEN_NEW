@@ -1,6 +1,8 @@
 "use client";
 
-import { AlertTriangle, Bell, BellOff, Eye, Info, Target } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Bell, BellOff, Eye, Info, Radar as RadarIcon, Target } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -38,12 +40,18 @@ const STAGE_META: Record<string, { label: string; variant: "neutral" | "info" | 
   READY: { label: "Ready", variant: "success" },
 };
 
+type Running = { id: string; name: string; kind: "opportunity" | "lead_search"; frequency: string; lastAlertAt: string | null; createdAt: string };
+
+const FREQUENCY_LABEL: Record<string, string> = { REALTIME: "every 15 minutes", DAILY: "daily", WEEKLY: "weekly" };
+
 export function RadarView({
   watches,
   freshness,
+  running,
 }: {
   watches: Watch[];
   freshness: { connected: boolean; notice: string };
+  running: Running[];
 }) {
   const active = watches.filter((w) => w.isActive);
   const neverFired = active.filter((w) => w.lastAlertAt === null);
@@ -57,6 +65,8 @@ export function RadarView({
           about.
         </p>
       </div>
+
+      <RunningWatches running={running} />
 
       <SignalNotice freshness={freshness} />
 
@@ -78,8 +88,8 @@ export function RadarView({
           <CardContent className="p-0">
             <EmptyState
               icon={Target}
-              title="Nothing being watched"
-              description="A watch is a standing instruction: tell me when this company posts a job, when this keyword appears, when this technology shows up somewhere new."
+              title="No signal watches"
+              description="Signal watches (a company, keyword or technology) wait on a signal source that is not built yet. For monitoring that runs today, use the watches above."
             />
           </CardContent>
         </Card>
@@ -164,6 +174,55 @@ export function RadarView({
         </>
       )}
     </div>
+  );
+}
+
+/** The watches that run now, with the two ways to make one. */
+function RunningWatches({ running }: { running: Running[] }) {
+  const create = (
+    <div className="flex flex-wrap gap-2">
+      <Button asChild variant="secondary" size="sm"><Link href="/find-leads">Watch for opportunities</Link></Button>
+      <Button asChild variant="ghost" size="sm"><Link href="/leads">Alert on a lead search</Link></Button>
+    </div>
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle className="flex items-center gap-1.5"><RadarIcon className="size-3.5" />Watches that run</CardTitle>
+          <p className="mt-0.5 text-2xs text-muted">
+            Opportunity watches re-search your connected sources on their schedule. Lead-search alerts notify you when newly surfaced leads match saved filters.
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {running.length === 0 ? (
+          <>
+            <p className="text-xs text-secondary">Nothing is being watched yet. Save a search on Find Opportunities, or filter Leads and choose Save search with an alert.</p>
+            {create}
+          </>
+        ) : (
+          <>
+            <ul className="divide-y divide-border-subtle rounded-md border border-border-subtle">
+              {running.map((w) => (
+                <li key={w.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                  <Bell className="size-3 text-success-text" />
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-primary">{w.name}</span>
+                  <Badge variant="neutral" size="sm">{w.kind === "opportunity" ? "opportunity watch" : "lead alert"}</Badge>
+                  <span className="text-2xs text-muted">
+                    {FREQUENCY_LABEL[w.frequency] ?? w.frequency.toLowerCase()} · {w.lastAlertAt ? `last found something ${formatAge(w.lastAlertAt)}` : "nothing found yet"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {create}
+              <Link href="/saved-alerts" className="text-2xs text-secondary hover:underline">Manage in Saved &amp; Alerts</Link>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

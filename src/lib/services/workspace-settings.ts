@@ -23,6 +23,8 @@ const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 export const workspaceSchema = z.object({
   name: z.string().trim().min(2).max(120),
   website: z.string().trim().url().max(200).or(z.literal("")).optional(),
+  /** Shared with prospects to pick a slot. https only: it is sent to people outside the workspace. */
+  bookingUrl: z.string().trim().max(300).refine((v) => v === "" || /^https:\/\/[^\s]+\.[^\s]+/.test(v), "Use a full https:// link to your scheduling page.").optional(),
   industry: z.string().trim().max(80).or(z.literal("")).optional(),
   gstin: z
     .string()
@@ -50,6 +52,7 @@ export async function getWorkspaceSettings(ctx: AuthContext) {
       name: true,
       slug: true,
       website: true,
+      bookingUrl: true,
       industry: true,
       gstin: true,
       country: true,
@@ -85,6 +88,7 @@ export async function updateWorkspaceSettings(
     select: {
       name: true,
       website: true,
+      bookingUrl: true,
       industry: true,
       gstin: true,
       timezone: true,
@@ -103,12 +107,14 @@ export async function updateWorkspaceSettings(
         // An empty string means "cleared", which for these is null rather than
         // an empty value sitting in the column.
         ...(input.website === "" ? { website: null } : {}),
+        ...(input.bookingUrl === "" ? { bookingUrl: null } : {}),
         ...(input.industry === "" ? { industry: null } : {}),
         ...(input.gstin === "" ? { gstin: null } : {}),
       },
       select: {
         name: true,
         website: true,
+        bookingUrl: true,
         industry: true,
         gstin: true,
         timezone: true,

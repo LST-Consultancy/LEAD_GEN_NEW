@@ -64,15 +64,16 @@ describe("freshness", () => {
 
     const f = await getSignalFreshness(ctx);
     expect(f.connected).toBe(false);
-    expect(f.notice).toMatch(/not growing/);
-    expect(f.notice).toMatch(/over data already here/);
+    expect(f.notice).toMatch(/phrase watching has no connected source/);
+    expect(f.notice).toMatch(/only when an opportunity is converted/);
   });
 
   it("says so differently when there are no signals at all", async () => {
     const { ctx } = await freshWorkspace();
     const f = await getSignalFreshness(ctx);
     expect(f.total).toBe(0);
-    expect(f.notice).toMatch(/no discovery source is connected to produce any/);
+    expect(f.notice).toMatch(/No signals recorded yet/);
+    expect(f.notice).toMatch(/under Opportunities/);
   });
 
   it("measures the age of the newest signal", async () => {

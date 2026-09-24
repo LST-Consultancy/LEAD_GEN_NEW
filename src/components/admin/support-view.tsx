@@ -5,6 +5,7 @@ import { AlertTriangle, Check, CircleHelp, ExternalLink, Info, X } from "lucide-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SystemCheck } from "@/lib/services/support";
+import { SupportRequests, type SupportRequestRow } from "@/components/admin/support-requests";
 
 const STATE = {
   ok: { icon: Check, variant: "success" as const, label: "Working" },
@@ -22,9 +23,13 @@ const STATE = {
 export function SupportView({
   checks,
   workspaceSlug,
+  requests,
+  isAdmin,
 }: {
   checks: SystemCheck[];
   workspaceSlug: string;
+  requests: SupportRequestRow[];
+  isAdmin: boolean;
 }) {
   const off = checks.filter((c) => c.state !== "ok");
 
@@ -80,7 +85,7 @@ export function SupportView({
         <CardContent className="space-y-2 pt-0 text-2xs leading-relaxed text-secondary">
           <Answer
             q="Why did my sequence not send anything?"
-            a="Because no delivery adapter is built — nothing sends on any channel yet. The sequence itself is running: open it and every enrollment shows whether it is waiting on the clock, held on configuration, or stopped because that person cannot be contacted."
+            a="Email sends only once a mailbox is connected through SMTP or Resend — check System status above. WhatsApp and LinkedIn have no sending adapter, so those steps are held. Open the sequence: every enrollment shows whether it is waiting on the clock, held on configuration, or stopped because that person cannot be contacted."
             href="/outreach"
             hrefLabel="Open Outreach"
           />
@@ -113,16 +118,10 @@ export function SupportView({
 
       <Card>
         <CardHeader>
-          <CardTitle>If you need to report something</CardTitle>
+          <CardTitle>Ask for help</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 pt-0">
-          <div className="flex gap-2 rounded-md border border-warning-border bg-warning-subtle p-2.5 text-2xs leading-relaxed text-warning-text">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-            <span>
-              <strong>There is no in-app ticketing.</strong> No form here opens a case, and none
-              pretends to. Contact whoever administers this deployment.
-            </span>
-          </div>
+          <SupportRequests initial={requests} isAdmin={isAdmin} />
           <p className="text-2xs leading-relaxed text-secondary">
             Include the workspace slug <span className="font-mono text-primary">{workspaceSlug}</span>{" "}
             and, if the app showed you a reference, that reference. Every request

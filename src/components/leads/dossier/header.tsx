@@ -2,19 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { toast } from "sonner";
 import {
   Archive,
   ArrowLeft,
   Building2,
-  CalendarPlus,
   ExternalLink,
-  FileText,
   Globe,
-  Mail,
   MapPin,
-  MessageCircle,
-  Phone,
   Users,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
@@ -29,11 +23,16 @@ import {
   RevealButtonSlot,
 } from "@/components/leads/dossier/lead-actions";
 import { formatAge, formatInrCompact } from "@/lib/format";
+import { LeadQuickActions } from "@/components/leads/dossier/quick-actions";
+import { EditLeadDetailsButton } from "@/components/leads/dossier/edit-details";
+import { ExportLeadButton } from "@/components/leads/dossier/export-lead";
 import type { IntentKey, LeadStatusKey, TierKey } from "@/lib/vocab";
 
 export function DossierHeader({
   lead,
+  canExport = false,
 }: {
+  canExport?: boolean;
   lead: {
     id: string;
     status: string;
@@ -51,6 +50,7 @@ export function DossierHeader({
       linkedinUrl: string | null;
       title: string;
       location: string;
+      city?: string | null;
       isDecisionMaker: boolean;
       languages: string[];
     };
@@ -68,6 +68,7 @@ export function DossierHeader({
     owner: { id: string; name: string; avatarUrl: string | null } | null;
     scoring: { displayScore: number } | null;
     deals: { id: string; valueInr: number; stage: { name: string } }[];
+    contacts: { kind: string; value: string | null; isLocked: boolean; optedOutAt: string | null }[];
   };
 }) {
   const openDeal = lead.deals.find((d) => d.stage.name !== "Won" && d.stage.name !== "Lost");
@@ -93,10 +94,15 @@ export function DossierHeader({
               <TierBadge tier={lead.tier as TierKey} size="lg" />
               <IntentBadge intent={lead.intent as IntentKey} size="lg" />
               {lead.person.isDecisionMaker ? (
-                <Badge variant="brand" uppercase>
-                  Decision maker
-                </Badge>
+                <Tooltip content="Inferred from their job title. Nobody has confirmed they can sign.">
+                  <span className="cursor-help">
+                    <Badge variant="brand" uppercase>
+                      Likely decision maker
+                    </Badge>
+                  </span>
+                </Tooltip>
               ) : null}
+              <EditLeadDetailsButton leadId={lead.id} person={{ name: lead.person.name, title: lead.person.title === "—" ? "" : lead.person.title, linkedinUrl: lead.person.linkedinUrl, city: lead.person.city ?? null }} />
               {lead.isArchived ? (
                 <Tooltip content="Auto-archived after a period of inactivity. Still fully searchable.">
                   <Badge variant="outline" uppercase>
@@ -209,30 +215,9 @@ export function DossierHeader({
 
         {/* Quick actions */}
         <div className="flex flex-wrap items-center gap-1.5 pb-2.5">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => toast("Outreach studio lands in Phase 4")}
-          >
-            <Mail />
-            Email
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast("WhatsApp lands in Phase 4")}>
-            <MessageCircle />
-            WhatsApp
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast("Call logging lands in Phase 4")}>
-            <Phone />
-            Call
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast("Bookings land in Phase 7")}>
-            <CalendarPlus />
-            Meeting
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast("Proposals land in Phase 7")}>
-            <FileText />
-            Proposal
-          </Button>
+          <LeadQuickActions
+            lead={{ id: lead.id, name: lead.person.name, companyName: lead.company.name, contacts: lead.contacts }}
+          />
 
           <RevealButtonSlot leadId={lead.id} lockedContactCount={lead.lockedContactCount} />
 
@@ -240,6 +225,8 @@ export function DossierHeader({
             <span className="text-2xs uppercase tracking-wider text-muted">Status</span>
             <StatusMenu leadId={lead.id} status={lead.status as LeadStatusKey} />
             <StarToggle leadId={lead.id} initial={lead.isStarred} />
+            {canExport ? <ExportLeadButton leadId={lead.id} /> : null}
+            <Button variant="ghost" size="sm" asChild><Link href={`/print/leads/${lead.id}`}>Print</Link></Button>
             <LeadLifecycleMenu
               leadId={lead.id}
               leadName={lead.person.name}

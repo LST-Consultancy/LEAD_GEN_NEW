@@ -9,8 +9,8 @@ import {
   activeEmailProvider,
   canReceiveReplies,
 } from "@/lib/outreach/provider";
-import { isCalendarConfigured, activeCalendarProvider } from "@/lib/services/bookings";
-import { hasIngestionSource, availableSources } from "@/lib/ingest/sources";
+import { isCalendarConfigured, canSyncCalendar, activeCalendarProvider } from "@/lib/services/bookings";
+import { getCapabilities, isUsable } from "@/lib/services/capabilities";
 import { localParts } from "@/lib/outreach/sendability";
 
 /**
@@ -185,6 +185,7 @@ export function summariseApprovals(pending: PendingApproval[]) {
  * automation has actually done lately.
  */
 export async function getTrustSummary(ctx: AuthContext) {
+  const capabilities = await getCapabilities(ctx);
   const config = await getAutopilotConfig(ctx);
   const since = startOfLocalDay(ctx.workspace.timezone);
 
@@ -247,18 +248,18 @@ export async function getTrustSummary(ctx: AuthContext) {
     },
     {
       name: "Calendar",
-      connected: isCalendarConfigured(),
-      detail: isCalendarConfigured()
+      connected: canSyncCalendar(),
+      detail: canSyncCalendar()
         ? `${activeCalendarProvider()}`
-        : "Nothing connected. Meetings are recorded here but no event or invite is created.",
+        : isCalendarConfigured()
+          ? `A ${activeCalendarProvider()} credential is present, but no calendar adapter is built, so no event or invite is created.`
+          : "Nothing connected. Meetings are recorded here but no event or invite is created.",
       grants: "Creates events and reads free/busy.",
     },
     {
       name: "Lead discovery",
-      connected: hasIngestionSource(),
-      detail: hasIngestionSource()
-        ? `${availableSources().length} source(s) available`
-        : "Only manual import, which needs nothing external. No discovery source is connected.",
+      connected: isUsable(capabilities.opportunity_discovery),
+      detail: capabilities.opportunity_discovery.detail,
       grants: "Fetches public signals and company data.",
     },
   ];

@@ -62,6 +62,8 @@ type LogSpec = {
     companyId?: string;
     dealId?: string;
     amountInr?: number;
+    channel?: "EMAIL" | "WHATSAPP" | "LINKEDIN" | "PHONE" | "SMS" | "IN_PERSON";
+    metadata?: Record<string, unknown>;
   };
 };
 

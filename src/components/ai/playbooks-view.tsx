@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/ui/states";
+import { PlaybookEditorButton, type PlaybookDraft, type StepOption } from "@/components/ai/playbook-editor";
 import { api } from "@/lib/api/client";
 import { formatAge, formatNumber } from "@/lib/format";
 import type { PlaybookSummary } from "@/lib/services/playbooks";
@@ -33,7 +34,9 @@ const STEP_BADGE: Record<ResolvedStep["status"], { label: string; variant: "neut
 export function PlaybooksView({
   playbooks,
   canManage,
+  stepOptions = [],
 }: {
+  stepOptions?: StepOption[];
   playbooks: PlaybookSummary[];
   canManage: boolean;
 }) {
@@ -42,7 +45,10 @@ export function PlaybooksView({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-lg font-semibold text-primary">Playbooks</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="flex-1 text-lg font-semibold text-primary">Playbooks</h1>
+          {canManage ? <PlaybookEditorButton options={stepOptions} label="New playbook" /> : null}
+        </div>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
           A trigger and an ordered list of steps. Each step is checked against the tool registry, so
           a playbook says up front where it would stop — rather than looking active and quietly
@@ -71,13 +77,14 @@ export function PlaybooksView({
               icon={Workflow}
               title="No playbooks yet"
               description="A playbook codifies something that already works for you: the conditions that make a lead worth this treatment, then the steps in order. Write the steps you take by hand today."
+              action={canManage ? <PlaybookEditorButton options={stepOptions} label="Write your first playbook" /> : undefined}
             />
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
           {playbooks.map((p) => (
-            <PlaybookCard key={p.id} playbook={p} canManage={canManage} />
+            <PlaybookCard key={p.id} playbook={p} canManage={canManage} stepOptions={stepOptions} />
           ))}
         </div>
       )}
@@ -97,9 +104,11 @@ export function PlaybooksView({
 function PlaybookCard({
   playbook,
   canManage,
+  stepOptions,
 }: {
   playbook: PlaybookSummary;
   canManage: boolean;
+  stepOptions: StepOption[];
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = React.useState(false);
@@ -291,6 +300,7 @@ function PlaybookCard({
 
         {canManage && expanded ? (
           <div className="flex justify-end pt-1">
+            <PlaybookEditorButton label="Edit" options={stepOptions} initial={{ id: playbook.id, name: playbook.name, description: playbook.description, trigger: playbook.trigger as PlaybookDraft["trigger"], steps: playbook.steps.map((s) => ({ action: s.action, note: s.note })) }} />
             <DeleteButton playbook={playbook} onDone={() => router.refresh()} />
           </div>
         ) : null}

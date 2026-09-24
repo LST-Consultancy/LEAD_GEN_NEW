@@ -99,6 +99,15 @@ function validateShape(input: z.output<typeof sequenceSchema>) {
         422
       );
     }
+    // Only email has a sending path. An automatic WhatsApp or LinkedIn step
+    // would be queued as a message to the lead's email address.
+    if (!step.isManualTask && step.channel !== "EMAIL") {
+      throw new MutationError(
+        `Step ${step.stepOrder} is ${step.channel.toLowerCase().replace("_", " ")}, which this app cannot send automatically. Make it a manual task — it becomes a task for the lead's owner on that day.`,
+        "channel_not_automatic",
+        422
+      );
+    }
   }
 }
 
@@ -786,4 +795,28 @@ export async function previewStep(
     provider: activeEmailProvider(),
     configured: isEmailConfigured(),
   };
+}
+
+/**
+ * Who is in a sequence and where they are, limited to leads the caller can
+ * see — a rep sees their own enrolments, not a colleague's.
+ */
+export async function listEnrollments(ctx: AuthContext, sequenceId: string) {
+  const sequence = await db.sequence.findFirst({ where: { id: sequenceId, workspaceId: ctx.workspaceId, deletedAt: null }, select: { id: true } });
+  if (!sequence) return null;
+  const rows = await db.sequenceEnrollment.findMany({
+    where: { sequenceId, workspaceId: ctx.workspaceId, lead: { deletedAt: null, ...leadVisibilityFilter(ctx) } },
+    orderBy: [{ state: "asc" }, { enrolledAt: "desc" }],
+    take: 200,
+    select: {
+      id: true, state: true, currentStep: true, nextSendAt: true, stopReason: true, repliedAt: true, completedAt: true, enrolledAt: true,
+      lead: { select: { id: true, person: { select: { fullName: true } }, company: { select: { name: true } } } },
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id, state: r.state, currentStep: r.currentStep, stopReason: r.stopReason,
+    nextSendAt: r.nextSendAt?.toISOString() ?? null, repliedAt: r.repliedAt?.toISOString() ?? null,
+    completedAt: r.completedAt?.toISOString() ?? null, enrolledAt: r.enrolledAt.toISOString(),
+    lead: { id: r.lead.id, name: r.lead.person.fullName, company: r.lead.company.name },
+  }));
 }

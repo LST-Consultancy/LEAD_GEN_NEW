@@ -7,9 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui/label";
 
-const DEMO = { email: "rahul@northbridge.example", password: "Signalroom123" };
-
-export function LoginForm() {
+export function LoginForm({ demo }: { demo: { email: string; password: string } | null }) {
   const router = useRouter();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -41,8 +39,9 @@ export function LoginForm() {
   }
 
   function fillDemo() {
-    setEmail(DEMO.email);
-    setPassword(DEMO.password);
+    if (!demo) return;
+    setEmail(demo.email);
+    setPassword(demo.password);
     setError(null);
   }
 
@@ -99,6 +98,7 @@ export function LoginForm() {
         </Button>
       </form>
 
+      {demo ? (
       <div className="rounded-lg border border-dashed border-border-strong bg-surface-sunken p-3.5">
         <p className="text-2xs font-semibold uppercase tracking-wider text-muted">Demo workspace</p>
         <p className="mt-1.5 text-xs leading-relaxed text-secondary">
@@ -107,17 +107,18 @@ export function LoginForm() {
         <dl className="mt-2.5 space-y-0.5 font-mono text-2xs text-secondary">
           <div className="flex gap-2">
             <dt className="text-muted">email</dt>
-            <dd>{DEMO.email}</dd>
+            <dd>{demo.email}</dd>
           </div>
           <div className="flex gap-2">
             <dt className="text-muted">pass</dt>
-            <dd>{DEMO.password}</dd>
+            <dd>{demo.password}</dd>
           </div>
         </dl>
         <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={fillDemo} type="button">
           Fill demo credentials
         </Button>
       </div>
+      ) : null}
     </div>
   );
 }

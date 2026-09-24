@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -18,12 +19,15 @@ import {
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/input";
+import { ApiError, api } from "@/lib/api/client";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/states";
 import { Tooltip } from "@/components/ui/tooltip";
 import { RISK_CLASS, AUTOPILOT_MODE } from "@/lib/vocab";
 import { formatAge, formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { OPPORTUNITY_TYPE_LABEL } from "@/lib/vocab";
 
 type Coach = {
   id: string;
@@ -339,6 +343,34 @@ const NOTE_COLOR: Record<string, string> = {
   violet: "border-border bg-surface-sunken",
 };
 
+/** A private note to self — the PERSONAL kind is visible only to its author. */
+function NoteToSelfComposer() {
+  const router = useRouter();
+  const [open, setOpen] = React.useState(false);
+  const [body, setBody] = React.useState("");
+  const [pending, setPending] = React.useState(false);
+  async function save() {
+    setPending(true);
+    try {
+      await api.post("/api/sticky-notes", { kind: "PERSONAL", color: "amber", body: body.trim() });
+      setBody(""); setOpen(false); toast.success("Note saved"); router.refresh();
+    } catch (err) {
+      toast.error("Couldn't save that note", { description: err instanceof ApiError ? err.message : "Nothing was saved." });
+    } finally { setPending(false); }
+  }
+  if (!open) return <Button variant="ghost" size="xs" onClick={() => setOpen(true)}>Add</Button>;
+  return (
+    <div className="flex w-full flex-col gap-1.5 pt-2">
+      <Textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} maxLength={2000} autoFocus aria-label="Note to self" placeholder="A promise you made, an objection you keep hearing…"
+        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && body.trim()) void save(); }} />
+      <div className="flex gap-1.5">
+        <Button variant="primary" size="xs" loading={pending} disabled={!body.trim()} onClick={save}>Save</Button>
+        <Button variant="ghost" size="xs" disabled={pending} onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
 /** §16 — workspace-level personal notes. */
 export function StickyNotes({ notes }: { notes: Note[] }) {
   return (
@@ -348,13 +380,7 @@ export function StickyNotes({ notes }: { notes: Note[] }) {
           <StickyNoteIcon className="size-3.5" />
           Notes to self
         </CardTitle>
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={() => toast("Note composer lands with the notes surface")}
-        >
-          Add
-        </Button>
+        <NoteToSelfComposer />
       </CardHeader>
       <CardContent>
         {notes.length === 0 ? (
@@ -438,34 +464,48 @@ export function MorningBriefing({ changes }: { changes: number }) {
   );
 }
 
-/** §14 — India Demand Index. Requires the ingestion pipeline, so it says so. */
-export function DemandIndexTeaser() {
+/**
+ * §14 — demand, from this workspace's own opportunity searches. Deliberately
+ * not called a market index: it counts what your searches found, which says
+ * nothing about demand you did not search for.
+ */
+export function DemandIndexTeaser({ demand }: { demand?: { total: number; types: { type: string; opportunities: number; companies: number }[] } }) {
+  const top = (demand?.types ?? []).slice(0, 4);
   return (
     <Card>
       <CardHeader>
         <div>
           <CardTitle className="flex items-center gap-1.5">
             <Sparkles className="size-3.5 text-ai-accent" />
-            India Demand Index
+            Demand you have found
           </CardTitle>
-          <p className="mt-0.5 text-2xs text-muted">Trending buyer demand by category and city</p>
+          <p className="mt-0.5 text-2xs text-muted">Active opportunities from your own searches, by kind of work — not a measure of the whole market</p>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="rounded-md border border-dashed border-border-strong bg-surface-sunken p-3">
-          <p className="text-xs leading-relaxed text-secondary">
-            This module reports demand velocity across industries, services and cities. It needs
-            enough ingested signal volume to compute a trend that means anything — showing movement
-            percentages from a demo dataset would be a fabricated metric, so it stays empty until the
-            ingestion pipeline is live.
-          </p>
-          <Button variant="ghost" size="sm" className="mt-2 w-full" asChild>
-            <Link href="/live-demand">
-              See what it will show
-              <ArrowRight />
-            </Link>
-          </Button>
-        </div>
+        {!demand || demand.total === 0 ? (
+          <div className="rounded-md border border-dashed border-border-strong bg-surface-sunken p-3">
+            <p className="text-xs leading-relaxed text-secondary">No active opportunities yet. Run a search on Find Opportunities, or save one as a watch so it re-runs on a schedule.</p>
+            <Button variant="ghost" size="sm" className="mt-2 w-full" asChild>
+              <Link href="/find-leads">Find opportunities<ArrowRight /></Link>
+            </Button>
+          </div>
+        ) : (
+          <>
+            <ul className="space-y-1">
+              {top.map((t) => (
+                <li key={t.type} className="flex items-center gap-2 text-xs">
+                  <Link href={`/opportunities?type=${t.type}&status=ACTIVE`} className="min-w-0 flex-1 truncate text-primary hover:underline">{OPPORTUNITY_TYPE_LABEL[t.type] ?? t.type}</Link>
+                  <span className="tabular text-primary">{t.opportunities}</span>
+                  <span className="text-2xs text-muted tabular">{t.companies} co.</span>
+                </li>
+              ))}
+            </ul>
+            <Button variant="ghost" size="sm" className="mt-2 w-full" asChild>
+              <Link href="/live-demand">All {demand.total} active<ArrowRight /></Link>
+            </Button>
+          </>
+        )}
       </CardContent>
     </Card>
   );

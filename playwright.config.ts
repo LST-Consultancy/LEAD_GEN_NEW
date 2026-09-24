@@ -1,4 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
+import { testEnv } from "./scripts/test-env.mjs";
+
+// Its own server on its own port, database, Redis db and build folder: the app on
+// :3000 serves real customer data and must never be the thing under test.
+const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3100";
+// Specs that seed fixtures open their own database connection from DATABASE_URL.
+// Workers inherit this process's environment, so pointing it at the test database
+// here is what keeps a spec's INSERT out of the working database.
+const TEST_ENV = testEnv();
+process.env.DATABASE_URL = TEST_ENV.DATABASE_URL;
+if (TEST_ENV.REDIS_URL) process.env.REDIS_URL = TEST_ENV.REDIS_URL;
 
 /**
  * End-to-end tests, against a real server and a real database.
@@ -12,7 +23,7 @@ import { defineConfig, devices } from "@playwright/test";
  *  - **They do not truncate anything.** The integration tests own that; these
  *    read the seed and clean up only what they create. A suite that wipes the
  *    developer's data to run is a suite nobody runs twice.
- *  - **`npm run dev`, not a production build.** The middleware and route
+ *  - **A dev server, not a production build**, on :3100 against the test database. The middleware and route
  *    handlers are what is under test; building first would double the feedback
  *    loop for no extra coverage. `reuseExistingServer` means a dev server
  *    already running is used as-is.
@@ -39,7 +50,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
 
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
+    baseURL: BASE_URL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
@@ -62,8 +73,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npm run dev -- --port ${new URL(process.env.E2E_BASE_URL ?? "http://localhost:3000").port || "3000"}`,
-    url: `${process.env.E2E_BASE_URL ?? "http://localhost:3000"}/login`,
+    command: `npx next dev --port ${new URL(BASE_URL).port || "3100"}`,
+    url: `${BASE_URL}/login`,
+    env: { ...TEST_ENV, SIGNALROOM_BUILD_DIR: ".next-opportunity-e2e" } as Record<string, string>,
     reuseExistingServer: true,
     timeout: 180_000,
     stdout: "ignore",

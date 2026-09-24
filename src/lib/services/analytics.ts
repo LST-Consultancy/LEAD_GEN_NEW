@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { type AuthContext } from "@/lib/auth/context";
+import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
 import { SIGNAL_SOURCE_LABEL } from "@/lib/vocab";
 
 /**
@@ -82,7 +82,8 @@ export async function getFunnel(ctx: AuthContext, opts: { days?: number } = {}) 
 /**
  * Which sources actually produce money.
  *
- * Attribution runs lead → search phrase → source kind, and revenue follows the
+ * Attribution runs lead → search phrase → source kind (or, with no phrase, the
+ * source of the lead's earliest signal), and revenue follows the
  * deals on those leads. Leads with no phrase are reported as their own row
  * rather than dropped, because "we do not know where most of our revenue came
  * from" is the finding.
@@ -95,6 +96,8 @@ export async function getSourceAttribution(ctx: AuthContext) {
       tier: true,
       repliedAt: true,
       sourcePhrase: { select: { id: true, phrase: true, sourceKind: true } },
+      // Leads converted from an opportunity carry its source as their first signal.
+      signals: { where: { deletedAt: null }, orderBy: { occurredAt: "asc" }, take: 1, select: { sourceKind: true } },
       deals: {
         where: { deletedAt: null },
         select: { valueInr: true, status: true },
@@ -118,11 +121,9 @@ export async function getSourceAttribution(ctx: AuthContext) {
   >();
 
   for (const lead of leads) {
-    const key = lead.sourcePhrase?.sourceKind ?? "__unattributed";
-    const label =
-      lead.sourcePhrase?.sourceKind
-        ? (SIGNAL_SOURCE_LABEL[lead.sourcePhrase.sourceKind] ?? lead.sourcePhrase.sourceKind)
-        : "No recorded source";
+    const kind = lead.sourcePhrase?.sourceKind ?? lead.signals[0]?.sourceKind ?? null;
+    const key = kind ?? "__unattributed";
+    const label = kind ? (SIGNAL_SOURCE_LABEL[kind] ?? kind) : "No recorded source";
 
     const row =
       buckets.get(key) ??
@@ -287,4 +288,45 @@ export async function getTeamPerformance(ctx: AuthContext, opts: { days?: number
       maxReplyRate: 10,
     },
   };
+}
+
+/**
+ * One cohort followed forward: the leads surfaced in the window, and how many
+ * of *those* were later contacted, replied, got a deal, and won. The funnel
+ * above counts each stage independently; this is the other reading, and the
+ * two are shown side by side because either alone misleads.
+ */
+export async function getCohortFunnel(ctx: AuthContext, opts: { days?: number } = {}) {
+  const days = opts.days ?? 90;
+  const since = new Date(Date.now() - days * 86_400_000);
+  const cohort = { workspaceId: ctx.workspaceId, deletedAt: null, surfacedAt: { gte: since }, ...leadVisibilityFilter(ctx) };
+  const [surfaced, contacted, replied, withDeal, won] = await Promise.all([
+    db.lead.count({ where: cohort }),
+    db.lead.count({ where: { ...cohort, lastContactedAt: { not: null } } }),
+    db.lead.count({ where: { ...cohort, repliedAt: { not: null } } }),
+    db.lead.count({ where: { ...cohort, deals: { some: { deletedAt: null } } } }),
+    db.lead.count({ where: { ...cohort, deals: { some: { deletedAt: null, status: "WON" } } } }),
+  ]);
+  const stages = [
+    { key: "surfaced", label: "Surfaced in window", count: surfaced },
+    { key: "contacted", label: "…later contacted", count: contacted },
+    { key: "replied", label: "…replied", count: replied },
+    { key: "deal", label: "…got a deal", count: withDeal },
+    { key: "won", label: "…won", count: won },
+  ];
+  return {
+    days,
+    // A share of zero leads is withheld, not 0%.
+    stages: stages.map((s) => ({ ...s, shareOfCohort: surfaced > 0 ? s.count / surfaced : null })),
+  };
+}
+
+/** Leads by tier and status, as counted — the mix a score threshold is judged against. */
+export async function getLeadMix(ctx: AuthContext) {
+  const rows = await db.lead.groupBy({
+    by: ["tier", "status"],
+    where: { workspaceId: ctx.workspaceId, deletedAt: null, archivedAt: null, ...leadVisibilityFilter(ctx) },
+    _count: { _all: true },
+  });
+  return rows.map((r) => ({ tier: r.tier, status: r.status, count: r._count._all }));
 }

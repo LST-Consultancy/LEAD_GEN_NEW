@@ -2,7 +2,8 @@ import "server-only";
 import { runOpportunityAction } from "@/lib/services/opportunity-jobs";
 import { discoverOpportunities } from "@/lib/services/opportunity-ingestion";
 import { refreshOpportunityWatches } from "@/lib/services/opportunity-watches";
-import { JOB, type JobName } from "@/lib/queue/jobs";
+import { JOB, JobEnvelopeError, validateJobEnvelope } from "@/lib/queue/jobs";
+import { db } from "@/lib/db";
 import { rescoreWorkspace } from "@/lib/queue/handlers/rescore";
 import {
   archiveStaleLeads,
@@ -16,7 +17,7 @@ import {
   refreshNextBestActions,
   sweepNotifications,
 } from "@/lib/queue/handlers/insights";
-import { deliverWebhook } from "@/lib/queue/handlers/webhooks";
+import { deliverWebhook, requeueStrandedDeliveries } from "@/lib/queue/handlers/webhooks";
 import {
   advanceSequences,
   sendMessage,
@@ -31,9 +32,12 @@ import { auditProposalTotals, expireProposals } from "@/lib/queue/handlers/propo
  * a worker dies mid-flight, so a second run has to be harmless. These are, by
  * being either pure recomputations or guarded by a "already done" check.
  */
-export async function runJob(name: JobName, data: Record<string, unknown>): Promise<unknown> {
-  const workspaceId = data.workspaceId as string;
-  if (!workspaceId) throw new Error(`Job ${name} received no workspaceId`);
+export async function runJob(rawName: string | undefined, data: Record<string, unknown> | undefined, jobId?: string): Promise<unknown> {
+  const { name, workspaceId } = validateJobEnvelope(jobId, rawName, data);
+  // A schedule can outlive its workspace; running it would touch nothing useful.
+  const workspace = await db.workspace.findFirst({ where: { id: workspaceId, deletedAt: null }, select: { id: true } });
+  if (!workspace) throw new JobEnvelopeError(`${jobId ? `Job ${jobId}` : "A job"} (${name}) is for workspace ${workspaceId}, which no longer exists. Nothing ran.`, "workspace_gone");
+  data = data ?? {};
 
   switch (name) {
     case JOB.OPPORTUNITY_ACTION: return runOpportunityAction(workspaceId, data as Parameters<typeof runOpportunityAction>[1]);
@@ -62,6 +66,9 @@ export async function runJob(name: JobName, data: Record<string, unknown>): Prom
 
     case JOB.SWEEP_NOTIFICATIONS:
       return sweepNotifications(workspaceId);
+
+    case JOB.REQUEUE_WEBHOOKS:
+      return requeueStrandedDeliveries(workspaceId);
 
     case JOB.DELIVER_WEBHOOK:
       return deliverWebhook(workspaceId, data.deliveryId as string);

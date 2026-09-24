@@ -17,6 +17,7 @@ import {
   type Verdict,
 } from "@/lib/autopilot/guardrails";
 import { localParts } from "@/lib/outreach/sendability";
+import { AGENT_CATALOGUE } from "@/lib/autopilot/agent-catalogue";
 
 /**
  * Autopilot and the agent layer.
@@ -705,4 +706,25 @@ export async function listAgentRuns(ctx: AuthContext, limit = 40) {
       executable: toolHealth(a.tool).implemented,
     })),
   }));
+}
+
+/**
+ * Sets a workspace up with the agents in the catalogue that it does not have.
+ * Idempotent: an existing agent — including one someone has configured — is
+ * never touched. New agents start disabled and review-first, so setting up
+ * does nothing on its own; enabling an agent is a separate, deliberate step.
+ */
+export async function provisionAgents(ctx: AuthContext) {
+  const existing = await db.aIAgent.findMany({ where: { workspaceId: ctx.workspaceId }, select: { kind: true } });
+  const missing = AGENT_CATALOGUE.filter((a) => !existing.some((e) => e.kind === a.kind));
+  return mutate(ctx, PERMISSIONS.AGENTS_CONFIGURE, async () => {
+    const r = await db.aIAgent.createMany({
+      data: missing.map((a) => ({ workspaceId: ctx.workspaceId, kind: a.kind, name: a.name, goal: a.goal, tools: [...a.tools], isEnabled: false, approvalPolicy: "review_first", dailyPointBudget: a.points, dailyActionCap: a.cap })),
+      skipDuplicates: true,
+    });
+    return {
+      result: { created: r.count, note: r.count ? `${r.count} agents added, all switched off. Review each one before enabling it.` : "Every agent is already set up." },
+      log: { action: "agents.provisioned", objectType: "Workspace", objectId: ctx.workspaceId, after: { created: r.count, kinds: missing.map((a) => a.kind) } },
+    };
+  });
 }

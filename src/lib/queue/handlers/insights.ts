@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { formatInrCompact } from "@/lib/format";
 import { generateCoachTip } from "@/lib/ai/coach";
 import { generateDailyBrief } from "@/lib/ai/daily-brief";
+import { fireSavedSearchAlerts } from "@/lib/services/saved-search-alerts";
+import { raiseNotification } from "@/lib/services/notify";
 
 const DAY = 86_400_000;
 
@@ -169,9 +171,14 @@ export async function refreshNextBestActions(workspaceId: string, leadIds?: stri
       });
     }
 
-    const ranked = candidates.sort((a, b) => b.score - a.score).slice(0, 4);
+    // Replaced wholesale, so a stale recommendation can never outlive its reason —
+    // but a person's decision on one survives the rewrite. A rejected action is not
+    // offered again; a chosen one keeps its date so the list does not ask twice.
+    const decided = await db.nextBestAction.findMany({ where: { leadId: lead.id, OR: [{ chosenAt: { not: null } }, { rejectedAt: { not: null } }] }, select: { action: true, chosenAt: true, rejectedAt: true, feedback: true } });
+    const decision = new Map(decided.map((d) => [d.action, d]));
+    const ranked = candidates.filter((c) => !decision.get(c.action)?.rejectedAt).sort((a, b) => b.score - a.score).slice(0, 4);
+    const rejected = decided.filter((d) => d.rejectedAt && !ranked.some((c) => c.action === d.action));
 
-    // Replaced wholesale, so a stale recommendation can never outlive its reason.
     await db.$transaction(async (tx) => {
       await tx.nextBestAction.deleteMany({ where: { leadId: lead.id } });
       await tx.nextBestAction.createMany({
@@ -187,8 +194,16 @@ export async function refreshNextBestActions(workspaceId: string, leadIds?: stri
           expectedImpactInr: openDeal
             ? openDeal.valueInr
             : (lead.estimatedBudgetInr ?? null),
+          chosenAt: decision.get(c.action)?.chosenAt ?? null,
+          feedback: decision.get(c.action)?.feedback ?? null,
         })),
       });
+      // Rejections are kept as hidden rows (rank past the list) so the refusal and its reason persist.
+      if (rejected.length) {
+        await tx.nextBestAction.createMany({
+          data: rejected.map((d, i) => ({ workspaceId, leadId: lead.id, action: d.action, label: d.action, rationale: "Rejected by a person", rank: 100 + i, score: 0, rejectedAt: d.rejectedAt, feedback: d.feedback })),
+        });
+      }
     });
     written += ranked.length;
   }
@@ -233,7 +248,7 @@ export async function sweepNotifications(workspaceId: string) {
       },
     });
     if (existing) return;
-    await db.notification.create({
+    const created = await raiseNotification({
       data: {
         workspaceId,
         userId,
@@ -246,7 +261,7 @@ export async function sweepNotifications(workspaceId: string) {
         dealId: data.dealId ?? null,
       },
     });
-    raised++;
+    if (created) raised++;
     void key;
   }
 
@@ -349,7 +364,36 @@ export async function sweepNotifications(workspaceId: string) {
     }
   }
 
-  return { workspaceId, raised };
+  // Tasks due within the hour, or overdue, for whoever owns them. A snoozed
+  // task is not due until its snooze ends. At most once a day per task, by
+  // notifyOnce's title-and-lead check.
+  const memberIds = new Set(members.map((m) => m.userId));
+  const due = await db.task.findMany({
+    where: {
+      workspaceId, deletedAt: null, ownerId: { not: null },
+      status: { in: ["QUEUED", "WORKING", "NEEDS_ATTENTION"] },
+      dueAt: { lte: new Date(now.getTime() + 3_600_000) },
+      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
+    },
+    select: { id: true, title: true, ownerId: true, dueAt: true, leadId: true, dealId: true },
+    take: 200,
+  });
+  for (const t of due) {
+    if (!memberIds.has(t.ownerId!)) continue;
+    const overdue = t.dueAt!.getTime() < now.getTime();
+    await notifyOnce(t.ownerId!, "TASK_DUE", `task:${t.id}`, {
+      title: `${overdue ? "Overdue" : "Due soon"}: ${t.title}`.slice(0, 200),
+      body: overdue ? "This task is past its due time." : "This task is due within the hour.",
+      severity: overdue ? "warning" : "info",
+      href: t.leadId ? `/leads/${t.leadId}` : "/my-queue",
+      leadId: t.leadId ?? undefined,
+      dealId: t.dealId ?? undefined,
+    });
+  }
+
+  // Saved-search alerts ride the same fifteen-minute sweep.
+  const searches = await fireSavedSearchAlerts(workspaceId);
+  return { workspaceId, raised: raised + searches.fired, savedSearchAlerts: searches.fired };
 }
 
 /**

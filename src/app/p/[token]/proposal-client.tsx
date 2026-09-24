@@ -89,6 +89,10 @@ export function ProposalClient({
     <main id="main" className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
       <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
+          {state.workspace.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a stored data URL or remote logo; next/image cannot optimise either
+            <img src={state.workspace.logoUrl} alt={`${state.workspace.name} logo`} className="mb-3 h-10 max-w-40 object-contain" />
+          ) : null}
           <p className="text-2xs uppercase tracking-wider text-muted">
             Proposal from {state.workspace.name}
           </p>
@@ -306,6 +310,11 @@ export function ProposalClient({
           Sent to you by {state.workspace.name}. If anything here looks wrong, reply to the
           message that brought you this link rather than answering above.
         </p>
+        {state.workspace.contact ? (
+          <p className="mt-1">
+            {[state.workspace.contact.email, state.workspace.contact.phone, state.workspace.contact.website, state.workspace.contact.address].filter(Boolean).join(" · ")}
+          </p>
+        ) : null}
       </footer>
     </main>
   );

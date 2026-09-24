@@ -9,7 +9,7 @@ import {
   canActuallySend,
   canReceiveReplies,
 } from "@/lib/outreach/provider";
-import { isCalendarConfigured } from "@/lib/services/bookings";
+import { isCalendarConfigured, canSyncCalendar } from "@/lib/services/bookings";
 import { isWhatsAppConfigured, WHATSAPP_ADAPTER_BUILT } from "@/lib/channels/whatsapp";
 import { RATE_LIMITS, rateLimit } from "@/lib/security/rate-limit";
 
@@ -82,10 +82,12 @@ export async function getSupportDiagnostics(
     },
     {
       name: "Calendar",
-      state: isCalendarConfigured() ? "ok" : "off",
-      detail: isCalendarConfigured()
-        ? "Credentialled."
-        : "Not connected. Meetings are recorded against the lead; no invite is sent.",
+      state: canSyncCalendar() ? "ok" : isCalendarConfigured() ? "degraded" : "off",
+      detail: canSyncCalendar()
+        ? "Connected."
+        : isCalendarConfigured()
+          ? "A credential is present but no calendar adapter is built. Meetings are recorded against the lead; no invite is sent."
+          : "Not connected. Meetings are recorded against the lead; no invite is sent.",
     },
   ];
 

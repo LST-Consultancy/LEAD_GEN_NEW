@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { getAccountSettings } from "@/lib/services/settings";
 import { getMfaStatus } from "@/lib/services/mfa";
 import { MfaPanel } from "@/components/admin/mfa-panel";
+import { PasswordForm, ProfileForm, RevokeOtherSessionsButton, RevokeSessionButton } from "@/components/admin/account-forms";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -61,11 +62,8 @@ export default async function AccountSettingsPage() {
             </dl>
           </div>
         </CardContent>
-        <CardFooter>
-          <p className="text-2xs text-muted">
-            Editing your profile isn&apos;t wired up yet. The fields above are read from your real
-            user record.
-          </p>
+        <CardFooter className="block">
+          <ProfileForm initial={{ name: user.name, timezone: user.timezone, locale: user.locale }} />
         </CardFooter>
       </Card>
 
@@ -83,9 +81,10 @@ export default async function AccountSettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
-            <Row label="Password" value="Set" />
-          </dl>
+          <div>
+            <p className="mb-1.5 text-2xs uppercase tracking-wider text-muted">Password</p>
+            <PasswordForm />
+          </div>
           <div className="border-t border-border-subtle pt-3">
             <p className="mb-1.5 text-2xs uppercase tracking-wider text-muted">Two-factor</p>
             <MfaPanel status={mfa} />
@@ -101,10 +100,11 @@ export default async function AccountSettingsPage() {
               Active sessions
             </CardTitle>
             <p className="mt-0.5 text-2xs text-muted">
-              {sessions.length} {sessions.length === 1 ? "session" : "sessions"} · each is
-              individually revocable
+              {sessions.length} {sessions.length === 1 ? "session" : "sessions"} · sign out any
+              device you don&apos;t recognise
             </p>
           </div>
+          <RevokeOtherSessionsButton count={sessions.filter((s) => !s.isCurrent).length} />
         </CardHeader>
         <CardContent>
           <ul className="space-y-1.5">
@@ -129,6 +129,7 @@ export default async function AccountSettingsPage() {
                     {formatDate(s.expiresAt)}
                   </p>
                 </div>
+                <RevokeSessionButton sessionId={s.id} current={s.isCurrent} />
               </li>
             ))}
           </ul>

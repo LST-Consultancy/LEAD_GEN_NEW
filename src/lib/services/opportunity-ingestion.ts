@@ -13,9 +13,19 @@ import { DEFAULT_RULES } from "@/lib/opportunities/scoring";
 import type { Prisma } from "@/generated/prisma/client";
 import { complete } from "@/lib/ai/complete";
 import { BUYER_SYSTEM_PROMPT, buyerPrompt, parseBuyerReply, screenUnattributed, verifyBuyer, type BuyerAttribution, type ScreenReason } from "@/lib/opportunities/buyer";
+import { raiseNotification } from "@/lib/services/notify";
+import { LINKEDIN_POSTS_PROVIDER } from "@/lib/providers/linkedin-posts";
+import { readCheckpoint, runLinkedInDiscovery, saveProviderCheckpoint } from "./linkedin-discovery";
 
-export async function ingestOpportunity(workspaceId: string, searchId: string, doc: SourceDocument, criteria: SearchCriteria, policy: { allowedExport: boolean; retentionDays: number }, now = new Date()) {
+/**
+ * Stores one source document as an opportunity, deduplicated per workspace.
+ * `assessed` means the caller already applied its qualification rules (the LinkedIn path in
+ * linkedin-discovery.ts, and a reviewer's confirmation) — so the legacy relevance, requirement and
+ * filter checks below are skipped rather than applied a second time with different semantics.
+ */
+export async function ingestOpportunity(workspaceId: string, searchId: string, doc: SourceDocument, criteria: SearchCriteria, policy: { allowedExport: boolean; retentionDays: number }, now = new Date(), opts: { assessed?: boolean } = {}) {
   const extracted = extractOpportunity(doc, criteria);
+  if (!opts.assessed) {
   if (!extracted.relevant) return null;
   if (!doc.company.name.trim()) {
     await db.discoveryCandidate.upsert({ where: { workspaceId_searchId_sourceUrl: { workspaceId, searchId, sourceUrl: canonicalUrl(doc.sourceUrl) } },
@@ -30,6 +40,8 @@ export async function ingestOpportunity(workspaceId: string, searchId: string, d
   if (criteria.locations.length && !criteria.locations.some(l => `${doc.company.country ?? ""} ${doc.location ?? ""}`.toLowerCase().includes(l.toLowerCase()))) return null;
   if (criteria.industries.length && !criteria.industries.some(i => doc.company.industry?.toLowerCase().includes(i.toLowerCase()))) return null;
   if (extracted.postedAt && (new Date(extracted.postedAt).getTime() < now.getTime() - criteria.dateRange.days * 86400000 || new Date(extracted.postedAt) > now)) return null;
+  }
+  if (!doc.company.name.trim()) throw new Error("An assessed document must name its buyer before it is stored as an opportunity.");
   const sourceUrl = canonicalUrl(doc.sourceUrl);
   const contentHash = hash({ title: doc.title, description: doc.description, status: doc.status, postedAt: doc.postedAt, closingAt: doc.closingAt, location: doc.location });
   return db.$transaction(async tx => {
@@ -38,7 +50,10 @@ export async function ingestOpportunity(workspaceId: string, searchId: string, d
     const search = await tx.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
     if (!search) throw new Error("Search does not belong to workspace.");
     const prior = await tx.opportunitySource.findUnique({ where: { workspaceId_provider_externalId: { workspaceId, provider: doc.provider, externalId: doc.externalId } } });
-    const sameUrl = prior ?? await tx.opportunitySource.findFirst({ where: { workspaceId, sourceUrl } });
+    // One LinkedIn post can arrive under several URLs; its activity id is the same under all of them.
+    const postKey = typeof doc.rawSourceReference.postKey === "string" ? doc.rawSourceReference.postKey : null;
+    const sameUrl = prior ?? await tx.opportunitySource.findFirst({ where: { workspaceId, sourceUrl } })
+      ?? (postKey ? await tx.opportunitySource.findFirst({ where: { workspaceId, provider: doc.provider, rawReference: { path: ["postKey"], equals: postKey } } }) : null);
     const sourceOpportunity = sameUrl ? await tx.opportunity.findFirst({ where: { id: sameUrl.opportunityId, workspaceId, deletedAt: null }, include: { company: true } }) : null;
     if (sameUrl && !sourceOpportunity) return null;
     const domain = normalizedDomain(doc.company.domain);
@@ -72,7 +87,7 @@ export async function ingestOpportunity(workspaceId: string, searchId: string, d
       await tx.opportunityEvidence.createMany({ data: score.evidence.map(e => ({ workspaceId, opportunityId: existing!.id, ...e, source: doc.provider, sourceUrl, occurredAt: data.postedAt, discoveredAt: prior?.discoveredAt ?? now, rawReference: { excerpt: extracted.evidence[0], hash: contentHash } })) });
     }
     if (score.intentScore >= criteria.minimumIntent) await tx.opportunitySearchResult.upsert({ where: { workspaceId_searchId_opportunityId: { workspaceId, searchId, opportunityId: existing.id } }, create: { workspaceId, searchId, opportunityId: existing.id }, update: {} });
-    return { id: existing.id, changed, duplicate: Boolean(prior) };
+    return { id: existing.id, changed, duplicate: Boolean(prior), discoveredAt: existing.discoveredAt };
   }, { timeout: 20000 });
 }
 const AI_BATCH = 20;
@@ -124,13 +139,42 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
     return { skipped: true };
   }
   const criteria = criteriaSchema.parse(search.criteria);
-  await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state: "RUNNING", progress: 10, startedAt: new Date(), steps: { queryExpansion: "completed", sourceDiscovery: "running" } } });
-  const outcomes: Record<string, { status: string; found: number; message?: string; screened?: Partial<Record<ScreenReason, number>> }> = {};
-  let found = 0; let success = 0;
-  for (const provider of search.providers) {
+  if (search.cancelRequestedAt) {
+    await db.opportunitySearch.updateMany({ where: { id: searchId, workspaceId, finishedAt: null }, data: { state: "CANCELLED", finishedAt: new Date(), progress: 100 } });
+    return { skipped: true };
+  }
+  // A redelivered or resumed job keeps its first start time.
+  await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state: "RUNNING", progress: Math.max(10, search.progress), startedAt: search.startedAt ?? new Date(), steps: { queryExpansion: "completed", sourceDiscovery: "running" } } });
+  const outcomes: Record<string, { status: string; found: number; message?: string; screened?: Partial<Record<ScreenReason, number>> } & Record<string, unknown>> = {};
+  const done = readCheckpoint(search.checkpoint).providers ?? {};
+  let found = 0; let success = 0; let cancelled = false;
+  for (const [index, provider] of search.providers.entries()) {
+    // A provider that finished before a redelivery or resume is not searched (or charged) again.
+    const finished = done[provider]?.outcome as (typeof outcomes)[string] | undefined;
+    if (finished?.status === "COMPLETED") { outcomes[provider] = finished; found += finished.found; success++; continue; }
     const connection = await db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId, provider } } });
     if (!connection?.enabled || !connection.allowedSearch || !connection.allowedStorage) { outcomes[provider] = { status: "NOT_CONNECTED", found: 0, message: "Connect this provider and confirm search/storage rights." }; continue; }
     const sync = await db.providerSync.create({ data: { workspaceId, provider, operation: "search", jobId: searchId, state: "RUNNING" } });
+    if (provider === LINKEDIN_POSTS_PROVIDER) {
+      try {
+        const config = providerConfigSchema.parse(connection.config);
+        const { outcome } = await runLinkedInDiscovery({ workspaceId, search, criteria, config, key: connection.encryptedCredentials ? decryptCredential(connection.encryptedCredentials, workspaceId, provider) : undefined, policy: connection,
+          onProgress: async (funnel, pagesPlanned) => { await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { progress: Math.min(90, 10 + Math.round(((index + Math.min(1, funnel.pagesAttempted / Math.max(1, pagesPlanned))) / search.providers.length) * 80)), providerResults: { ...outcomes, [provider]: { status: "RUNNING", found: funnel.unique, funnel } } as Prisma.InputJsonValue } }); } });
+        outcomes[provider] = outcome;
+        await saveProviderCheckpoint(workspaceId, searchId, provider, { outcome });
+        if (outcome.status === "COMPLETED") success++;
+        if (outcome.status === "CANCELLED") cancelled = true;
+        found += outcome.found;
+        const f = outcome.funnel;
+        await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: outcome.status === "ERROR" ? "FAILED" : outcome.status, recordsFound: f.unique, recordsCreated: f.qualifiedNew, recordsUpdated: f.qualifiedKnown, duplicates: f.duplicates, credits: f.usageUsd, error: outcome.message ?? null, finishedAt: new Date() } });
+      } catch {
+        const message = "LinkedIn discovery failed unexpectedly. Posts already processed were kept; resume the search to continue.";
+        outcomes[provider] = { status: "ERROR", found: 0, message };
+        await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: "FAILED", error: message, finishedAt: new Date() } });
+      }
+      if (cancelled) break;
+      continue;
+    }
     try {
       const adapter = discoveryProvider(workspaceId, provider, providerConfigSchema.parse(connection.config), connection.encryptedCredentials ? decryptCredential(connection.encryptedCredentials, workspaceId, provider) : undefined);
       let documents: SourceDocument[]; let partial = false;
@@ -144,28 +188,29 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
       }
       found += documents.length; if (!partial) success++;
       outcomes[provider] = { status: partial ? "PARTIAL" : "COMPLETED", found: documents.length, screened, ...(partial ? { message: "Some requests failed or reached quota. Retrieved matches were retained; narrow the search or retry later." } : {}) };
+      await saveProviderCheckpoint(workspaceId, searchId, provider, { outcome: outcomes[provider] });
       await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: partial ? "PARTIAL" : "COMPLETED", recordsFound: documents.length, recordsCreated: created, recordsUpdated: updated, duplicates, finishedAt: new Date() } });
     } catch {
       const message = "Provider discovery failed. Check credentials, permissions, response format and quota. Partial records may have been retained.";
       outcomes[provider] = { status: "ERROR", found: 0, message };
       await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: "FAILED", error: message, finishedAt: new Date() } });
     }
-    await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { progress: Math.min(90, 10 + Math.round(Object.keys(outcomes).length / search.providers.length * 80)), providerResults: outcomes, found } });
+    await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { progress: Math.min(90, 10 + Math.round(Object.keys(outcomes).length / search.providers.length * 80)), providerResults: outcomes as Prisma.InputJsonValue, found } });
   }
   const qualified = await db.opportunitySearchResult.count({ where: { workspaceId, searchId } });
-  const state = success === search.providers.length ? "COMPLETED" : success || found || qualified ? "PARTIAL" : "FAILED";
+  const state = cancelled ? "CANCELLED" : success === search.providers.length ? "COMPLETED" : success || found || qualified ? "PARTIAL" : "FAILED";
   await db.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "OpportunitySearch" WHERE id = ${searchId}::uuid AND "workspaceId" = ${workspaceId}::uuid FOR UPDATE`;
     const current = await tx.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
     if (current?.finishedAt) return;
-    await tx.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state, progress: 100, found, qualified, providerResults: outcomes, finishedAt: new Date(), error: state === "FAILED" ? "Search could not complete. Inspect source status." : null, steps: { queryExpansion: "completed", sourceDiscovery: state.toLowerCase(), deduplication: "completed", companyResolution: "completed", scoring: "completed", enrichment: "not_requested" } } });
+    await tx.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state, progress: 100, found, qualified, providerResults: outcomes as Prisma.InputJsonValue, finishedAt: new Date(), error: state === "FAILED" ? "Search could not complete. Inspect source status." : null, steps: { queryExpansion: "completed", sourceDiscovery: state.toLowerCase(), deduplication: "completed", companyResolution: "completed", scoring: "completed", enrichment: "not_requested" } } });
     if (search.savedSearchId && qualified) {
       const currentResults = await tx.opportunitySearchResult.findMany({ where: { workspaceId, searchId }, select: { opportunityId: true } });
       const previousResults = await tx.opportunitySearchResult.findMany({ where: { workspaceId, opportunityId: { in: currentResults.map(r => r.opportunityId) }, search: { workspaceId, savedSearchId: search.savedSearchId, id: { not: searchId }, finishedAt: { not: null } } }, select: { opportunityId: true } });
       const known = new Set(previousResults.map(r => r.opportunityId));
       const newCount = currentResults.filter(r => !known.has(r.opportunityId)).length;
       if (newCount) {
-        await tx.notification.create({ data: { workspaceId, userId: search.createdById, kind: "LEAD_SIGNAL", title: "New opportunity matches", body: `${newCount} new matching opportunities. Review source evidence before outreach.`, href: `/opportunities?searchId=${searchId}` } });
+        await raiseNotification({ data: { workspaceId, userId: search.createdById, kind: "LEAD_SIGNAL", title: "New opportunity matches", body: `${newCount} new matching opportunities. Review source evidence before outreach.`, href: `/opportunities?searchId=${searchId}` } }, tx);
         await tx.savedSearch.updateMany({ where: { id: search.savedSearchId, workspaceId }, data: { lastAlertAt: new Date() } });
       }
     }

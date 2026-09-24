@@ -1,5 +1,8 @@
 import "dotenv/config";
 import { Pool } from "pg";
+import { assertSafeTestDatabase } from "../scripts/test-env.mjs";
+// Refuses anything but a local *_test database: this spec inserts fixture rows.
+assertSafeTestDatabase(process.env.DATABASE_URL ?? "");
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
@@ -87,6 +90,7 @@ test("settings exposes lead APIs, worker readiness and provider-specific control
   await form.getByRole("button", { name: "Add company board" }).click();
   await expect(form.getByLabel("Board 1 company")).toBeVisible();
   await form.getByLabel("Provider", { exact: true }).selectOption("brave");
-  await expect(form.getByLabel(/Include indexed public LinkedIn posts/)).toBeChecked();
+  // Removed: search indexes don't reach LinkedIn posts, so that option did nothing.
+  await expect(form.getByLabel(/Include indexed public LinkedIn posts/)).toHaveCount(0);
   await page.screenshot({ path: "/tmp/signalroom-provider-settings.png", fullPage: true });
 });

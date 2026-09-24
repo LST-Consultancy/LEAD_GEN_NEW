@@ -25,6 +25,7 @@ import {
   SIGNAL_TEMPLATES,
   KNOWLEDGE_DOCS,
 } from "./seed-data.js";
+import { AGENT_CATALOGUE } from "../src/lib/autopilot/agent-catalogue.js";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const db = new PrismaClient({ adapter });
@@ -66,6 +67,18 @@ const slugName = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "");
 
 async function main() {
+  // The reset below deletes every workspace and user. Refuse when the target
+  // holds anyone who is not a fixture (reserved .example/.invalid domains), so
+  // pointing the seed at a working database cannot erase real customers.
+  const real = await db.user.count({
+    where: { NOT: [{ email: { endsWith: ".example" } }, { email: { endsWith: ".invalid" } }] },
+  });
+  if (real > 0 && process.env.SEED_ERASES_REAL_DATA !== "yes") {
+    throw new Error(
+      `Refusing to seed: this database has ${real} real account(s) and seeding deletes every workspace and user. ` +
+        "Seed a separate database (npm run db:test:prepare), or set SEED_ERASES_REAL_DATA=yes if erasing it is intended."
+    );
+  }
   console.log("→ Resetting demo data");
   // Workspace cascade removes all tenant-owned rows; users and plans are global.
   await db.workspace.deleteMany({});
@@ -1835,16 +1848,8 @@ async function main() {
 
   // ---------------------------------------------------------------- agents
   console.log("→ Agents and runs");
-  const agentDefs = [
-    { kind: "PROSPECTING", name: "Prospecting agent", goal: "Find leads matching the primary ICP with a signal under 14 days old.", tools: ["find_leads", "search_leads", "add_lead"], enabled: true, points: 10, cap: 25 },
-    { kind: "RESEARCH", name: "Research agent", goal: "Build account dossiers for Tier A leads before first contact.", tools: ["get_account", "research_company", "add_note"], enabled: true, points: 12, cap: 6 },
-    { kind: "SDR", name: "SDR agent", goal: "Draft first-touch outreach grounded in the actual signal and knowledge base.", tools: ["draft_outreach", "enroll_sequence"], enabled: true, points: 0, cap: 20 },
-    { kind: "FOLLOW_UP", name: "Follow-up agent", goal: "Keep pending conversations moving without nagging.", tools: ["draft_outreach", "create_task"], enabled: true, points: 0, cap: 30 },
-    { kind: "PIPELINE", name: "Pipeline agent", goal: "Detect stalled deals and missing next steps, and explain why each matters.", tools: ["get_pipeline", "update_deal", "create_task"], enabled: true, points: 0, cap: 50 },
-    { kind: "PROPOSAL", name: "Proposal agent", goal: "Draft proposals from the deal, knowledge base and pricing guardrails.", tools: ["get_lead", "draft_proposal"], enabled: false, points: 0, cap: 5 },
-    { kind: "MEETING", name: "Meeting agent", goal: "Prepare a call brief 30 minutes before every booked meeting.", tools: ["get_meetings", "get_lead", "get_account"], enabled: true, points: 0, cap: 10 },
-    { kind: "REVENUE_ANALYST", name: "Revenue analyst", goal: "Explain pipeline movement and forecast changes with the numbers behind them.", tools: ["get_insights", "get_pipeline"], enabled: true, points: 0, cap: 5 },
-  ];
+  // The same catalogue a real workspace is set up from; the demo enables all but the proposal agent.
+  const agentDefs = AGENT_CATALOGUE.map((a) => ({ ...a, tools: [...a.tools], enabled: a.kind !== "PROPOSAL" }));
   const agents = [];
   for (const a of agentDefs) {
     agents.push(

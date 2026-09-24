@@ -5,6 +5,9 @@ import {
   JOB_POLICY,
   JOB_SCHEDULE,
   QUEUE_NAME,
+  safeJobId,
+  schedulerId,
+  staleSchedulerIds,
   type JobName,
   type JobPayload,
 } from "@/lib/queue/jobs";
@@ -32,15 +35,6 @@ function queue(): Queue | null {
     },
   });
   return globalForQueue.srQueue;
-}
-
-/**
- * BullMQ reserves ':' as its own key separator and rejects a custom job id
- * containing one, so dedupe keys are normalised here rather than every caller
- * having to remember. Anything outside a safe set becomes a dash.
- */
-function safeJobId(key: string): string {
-  return key.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 200);
 }
 
 /**
@@ -138,7 +132,7 @@ export async function installSchedules(workspaceIds: string[]): Promise<number> 
         // BullMQ 6 keys a scheduler by this id, so re-running on every worker
         // boot updates the existing schedule instead of stacking a second one.
         await q.upsertJobScheduler(
-          safeJobId(`${name}-${workspaceId}`),
+          schedulerId(name, workspaceId),
           { pattern: schedule.cron },
           {
             name,
@@ -158,11 +152,60 @@ export async function installSchedules(workspaceIds: string[]): Promise<number> 
   return installed;
 }
 
+/**
+ * Removes schedulers that no longer correspond to a live workspace and a
+ * scheduled job. Runs after `installSchedules` on worker boot, so it only ever
+ * removes what the current code would not have installed. Queued one-off work
+ * is untouched; only recurring definitions are reconciled.
+ */
+export async function removeStaleSchedules(workspaceIds: string[]): Promise<string[]> {
+  const q = queue();
+  if (!q) return [];
+  const existing = (await q.getJobSchedulers(0, -1)).map((s) => s.key);
+  const stale = staleSchedulerIds(existing, workspaceIds);
+  const removed: string[] = [];
+  for (const id of stale) {
+    try { if (await q.removeJobScheduler(id)) removed.push(id); }
+    catch (err) { log.queue.error("failed to remove stale schedule", { id, err }); }
+  }
+  return removed;
+}
+
+/** Removes one scheduler, e.g. when its workspace turns out to be gone. */
+export async function removeSchedule(id: string): Promise<boolean> {
+  const q = queue();
+  if (!q) return false;
+  try { return await q.removeJobScheduler(id); } catch { return false; }
+}
+
+/**
+ * When each job last finished successfully for a workspace. Read from the
+ * retained completed-job window (a day, up to 500 jobs), so "never" means
+ * "not within that window" and the monitor says so.
+ */
+export async function lastSuccessByJob(workspaceId: string): Promise<Partial<Record<string, string>>> {
+  const q = queue();
+  if (!q) return {};
+  try {
+    const jobs = await q.getJobs(["completed"], 0, 499);
+    const out: Partial<Record<string, string>> = {};
+    for (const j of jobs) {
+      if (!j?.finishedOn || (j.data as { workspaceId?: string })?.workspaceId !== workspaceId) continue;
+      const at = new Date(j.finishedOn).toISOString();
+      if (!out[j.name] || out[j.name]! < at) out[j.name] = at;
+    }
+    return out;
+  } catch (err) {
+    log.queue.warn("last success unavailable", { err });
+    return {};
+  }
+}
+
 /** Queue depth and recent outcomes, for the job monitor. */
 export async function getQueueStats(): Promise<{
   configured: boolean;
   counts: Record<string, number> | null;
-  repeatable: { name: string; pattern: string | null; next: number | null }[];
+  repeatable: { key: string; name: string; pattern: string | null; next: number | null }[];
 }> {
   const q = queue();
   if (!q) return { configured: false, counts: null, repeatable: [] };
@@ -176,11 +219,12 @@ export async function getQueueStats(): Promise<{
       "delayed",
       "prioritized"
     );
-    const repeat = await q.getJobSchedulers(0, 50);
+    const repeat = await q.getJobSchedulers(0, -1);
     return {
       configured: true,
       counts,
       repeatable: repeat.map((r) => ({
+        key: r.key,
         name: r.name ?? "unknown",
         pattern: r.pattern ?? null,
         next: r.next ? Number(r.next) : null,

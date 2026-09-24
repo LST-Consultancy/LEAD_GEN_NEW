@@ -149,3 +149,18 @@ export function greeting(now: Date = new Date(), timezone = "Asia/Kolkata"): str
   if (hour < 17) return "Good afternoon";
   return "Good evening";
 }
+
+/**
+ * The instant a calendar day (YYYY-MM-DD) begins in a timezone. A date filter
+ * "from the 3rd" means from midnight on the 3rd where the workspace is, not
+ * midnight UTC — which in IST is 05:30 and would drop the morning's leads.
+ */
+export function startOfLocalDay(dateKey: string, timezone: string): Date {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d);
+  // The zone's offset at that moment, read back from how the zone displays it.
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(guess));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const shown = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return new Date(guess - (shown - guess));
+}

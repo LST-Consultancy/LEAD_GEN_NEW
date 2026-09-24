@@ -17,7 +17,16 @@ import { TEMPLATE_VARIABLES } from "@/lib/outreach/template";
  *    addresses the right person if the contact changes before it goes.
  */
 
-export type DraftChannel = "email" | "whatsapp" | "linkedin";
+export type DraftChannel = "email" | "whatsapp" | "linkedin" | "call";
+
+/** Writing language. English is the default and says so; the others are asked for. */
+export type DraftLanguage = "en" | "hinglish" | "hi";
+
+export const LANGUAGE_RULES: Record<DraftLanguage, { label: string; rule: string }> = {
+  en: { label: "English", rule: "Indian English." },
+  hinglish: { label: "Hinglish", rule: "Hinglish: conversational Hindi and English mixed the way Indian professionals write to each other, in Latin script. Keep business terms in English." },
+  hi: { label: "Hindi", rule: "Hindi in Devanagari script. Keep product names, company names and business terms that are normally said in English in English." },
+};
 
 export const CHANNEL_RULES: Record<DraftChannel, { label: string; rule: string; maxWords: number }> = {
   email: {
@@ -34,6 +43,11 @@ export const CHANNEL_RULES: Record<DraftChannel, { label: string; rule: string; 
     label: "LinkedIn",
     rule: "A connection note or short message under fifty words. No subject line. It sits in a crowded inbox next to recruiters, so the first clause has to earn the second.",
     maxWords: 50,
+  },
+  call: {
+    label: "Call opener",
+    rule: "What the caller says in the first twenty seconds of a cold call: who they are, the one specific reason for calling taken from GROUNDING, then a single open question. Spoken, not written — short sentences, no subject line, no list.",
+    maxWords: 70,
   },
 };
 
@@ -57,11 +71,16 @@ Hard rules:
   live record when the message is sent.
 - No flattery, no "I hope this finds you well", no "I wanted to reach out", no
   claim to have researched them at length.
-- Indian English. Money in lakh and crore where it appears in GROUNDING.
+- Write in the LANGUAGE given below. Placeholders, company names and figures
+  stay exactly as written whatever the language. Money in lakh and crore where
+  it appears in GROUNDING.
 
 Return strict JSON and nothing else:
 {"subject": string | null, "body": string, "variablesUsed": string[], "groundedOn": string[], "withheld": string | null}
 
+- When GROUNDING contains "The conversation so far", you are writing a reply:
+  answer what their latest message actually says or asks, in the same thread,
+  and do not restart with a first-contact pitch.
 - "subject" is null for channels that have none.
 - "groundedOn" names the GROUNDING items you actually drew on, by their heading.
 - "withheld" is a sentence naming what you could not say for lack of grounding,
@@ -84,8 +103,10 @@ export function buildDraftPrompt(input: {
   channel: DraftChannel;
   sections: GroundingSection[];
   angle?: string;
+  language?: DraftLanguage;
 }): string {
   const channel = CHANNEL_RULES[input.channel];
+  const language = LANGUAGE_RULES[input.language ?? "en"];
   const grounding = input.sections
     .filter((s) => s.lines.length > 0)
     .map((s) => `## ${s.heading}\n${s.lines.map((l) => `- ${l}`).join("\n")}`)
@@ -99,6 +120,7 @@ export function buildDraftPrompt(input: {
     variableVocabulary(),
     "",
     `CHANNEL: ${channel.label}. ${channel.rule} Stay under ${channel.maxWords} words.`,
+    `LANGUAGE: ${language.rule}`,
     input.angle ? `ANGLE THE SENDER ASKED FOR: ${input.angle}` : "",
     "",
     "Write the draft.",

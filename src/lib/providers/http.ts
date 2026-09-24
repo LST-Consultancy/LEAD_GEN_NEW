@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { rateLimit } from "@/lib/security/rate-limit";
 import { getRedis } from "@/lib/queue/connection";
 import { db } from "@/lib/db";
+import { ProviderRequestError } from "./provider-errors";
+export { ProviderRequestError };
 // Fixed documented vendor hosts only. Arbitrary URLs, redirects and crawler requests are refused.
 const HOSTS = new Set(["api.search.brave.com", "boards-api.greenhouse.io", "api.lever.co", "api.hunter.io", "api.adzuna.com", "api.ashbyhq.com", "www.signalhire.com", "api.apify.com"]);
 export function validateProviderUrl(raw: string) {
@@ -10,18 +12,22 @@ export function validateProviderUrl(raw: string) {
   if (u.protocol !== "https:" || !HOSTS.has(u.hostname) || u.port || u.username || u.password) throw new Error("Provider destination is not permitted.");
   return u;
 }
+// Apify's own API allows far more than a search board does, and one LinkedIn page costs a start,
+// a poll or two and a dataset read, so the default 20/minute would stall a two-page search.
+const LIMITS: Record<string, [number, number][]> = { linkedin_posts: [[60, 60], [3600, 1000], [86400, 5000]] };
+const DEFAULT_LIMITS: [number, number][] = [[60, 20], [3600, 300], [86400, 1500]];
 export async function providerJson(workspaceId: string, provider: string, url: string, headers: Record<string, string> = {}, body?: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<unknown> {
   const timeoutMs = opts.timeoutMs ?? 15000;
   const u = validateProviderUrl(url);
   const redis = getRedis();
   if (!redis) throw new Error("Provider requests require Redis for shared limits and concurrency.");
   const lockKey = `provider-lock:${workspaceId}:${provider}`; const token = randomUUID();
-  if (await redis.set(lockKey, token, "EX", Math.max(120, Math.ceil(timeoutMs / 1000) + 30), "NX") !== "OK") throw new Error("Another request to this provider is active. Retry shortly.");
+  if (await redis.set(lockKey, token, "EX", Math.max(120, Math.ceil(timeoutMs / 1000) + 30), "NX") !== "OK") throw new ProviderRequestError("Another request to this provider is active. Retry shortly.", "busy");
   try {
     for (let attempt = 0; attempt < (body ? 1 : 3); attempt++) {
-      for (const [windowSeconds, limit] of [[60, 20], [3600, 300], [86400, 1500]]) {
+      for (const [windowSeconds, limit] of LIMITS[provider] ?? DEFAULT_LIMITS) {
         const result = await rateLimit("write", `provider:${workspaceId}:${provider}:${windowSeconds}`, { windowSeconds, limit });
-        if (!result.allowed || result.degraded) throw new Error("Provider request limit reached or shared limiter unavailable. Try later.");
+        if (!result.allowed || result.degraded) throw new ProviderRequestError("Provider request limit reached or shared limiter unavailable. Try later.", "rate_limited", null, result.degraded ? null : windowSeconds);
       }
       const request = await db.providerSync.create({ data: { workspaceId, provider, operation: "http_request", state: "RUNNING", requests: 1 } });
       let response: Response;
@@ -39,10 +45,10 @@ export async function providerJson(workspaceId: string, provider: string, url: s
         await db.providerSync.update({ where: { id: request.id, workspaceId }, data: { state: "FAILED", error: `HTTP ${response.status}`, finishedAt: new Date() } });
       } catch {
         await db.providerSync.update({ where: { id: request.id, workspaceId }, data: { state: "FAILED", error: "Connection, timeout or response validation failure.", finishedAt: new Date() } });
-        throw new Error("Provider connection failed, timed out or returned invalid data.");
+        throw new ProviderRequestError("Provider connection failed, timed out or returned invalid data.", "network");
       }
       if ((response.status === 429 || response.status >= 500) && attempt < 2) { await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt)); continue; }
-      throw new Error(`Provider request failed (HTTP ${response.status}). Check connection permissions and quota.`);
+      throw new ProviderRequestError(`Provider request failed (HTTP ${response.status}). Check connection permissions and quota.`, response.status === 429 ? "rate_limited" : "http", response.status);
     }
     throw new Error("Provider retries exhausted.");
   } finally { await redis.eval('if redis.call("get",KEYS[1]) == ARGV[1] then return redis.call("del",KEYS[1]) else return 0 end', 1, lockKey, token); }

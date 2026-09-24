@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
-import { hasIngestionSource, SOURCES } from "@/lib/ingest/sources";
+import type { Capability, Operation } from "@/lib/services/capabilities";
 import { isConfigured } from "@/lib/ai/provider";
 import { TOOLS } from "@/lib/ai/tools";
 
@@ -55,13 +55,14 @@ export type ResearchCapability = {
   sourcesUnconfigured: { label: string; requires: string }[];
 };
 
-export function researchCapability(): ResearchCapability {
+/** Takes the workspace's capabilities so the connected-provider list is real, not a static registry. */
+export function researchCapability(capabilities: Record<Operation, Capability>): ResearchCapability {
   const tool = TOOLS.find((t) => t.name === "research_company");
-  const hasSource = hasIngestionSource();
+  const hasSource = capabilities.company_research.state === "available";
   const hasModel = isConfigured();
 
   const missing: string[] = [];
-  if (!hasSource) missing.push("a licensed data source");
+  if (!hasSource) missing.push("an external company-research source, which is not built");
   if (!hasModel) missing.push("a model provider");
   if (!tool?.implemented) missing.push("the research_company tool, which isn't built");
 
@@ -69,12 +70,11 @@ export function researchCapability(): ResearchCapability {
     externalAvailable: missing.length === 0,
     missing,
     toolBuilt: tool?.implemented ?? false,
-    sourcesConfigured: Object.values(SOURCES)
-      .filter((s) => s.configured)
-      .map((s) => s.label),
-    sourcesUnconfigured: Object.values(SOURCES)
-      .filter((s) => !s.configured)
-      .map((s) => ({ label: s.label, requires: s.requires })),
+    // Connected providers serve discovery and contact finding; listed so the user sees what does work.
+    sourcesConfigured: [...capabilities.opportunity_discovery.providers, ...capabilities.contact_enrichment.providers]
+      .filter((p) => p.state === "healthy" || p.state === "untested")
+      .map((p) => p.name),
+    sourcesUnconfigured: [],
   };
 }
 

@@ -34,16 +34,16 @@ describe("the event catalogue", () => {
     }
   });
 
-  it("admits that reply events cannot fire without a mailbox", () => {
+  it("says reply events come from replies logged by hand, since no mailbox reader exists", () => {
     const reply = WEBHOOK_EVENTS.find((e) => e.key === "message.replied")!;
-    expect(reply.emitted).toBe(false);
-    expect(reply.note).toMatch(/No mailbox is connected/);
+    expect(reply.emitted).toBe(true);
+    expect(reply.note).toMatch(/logged by hand/);
   });
 
   it("counts emitted against total", () => {
     const c = getWebhookCatalogue();
-    expect(c.emittedCount).toBeLessThan(c.totalCount);
-    expect(c.emittedCount).toBeGreaterThan(0);
+    // Every declared event now has an emitter (see tests/webhook-events.test.ts).
+    expect(c.emittedCount).toBe(c.totalCount);
   });
 });
 
@@ -76,14 +76,13 @@ describe("creating a webhook", () => {
     ).rejects.toThrow(/not an event this app emits/);
   });
 
-  it("warns when a subscription would hear nothing", async () => {
+  it("does not warn when every subscribed event is emitted", async () => {
     const { ctx } = await freshWorkspace();
     const result = await createWebhook(ctx, {
       ...valid,
       events: ["message.replied"],
     });
-    expect(result.note).toMatch(/not emitted yet/);
-    expect(result.note).toMatch(/will hear nothing/);
+    expect(result.note).not.toMatch(/not emitted yet/);
   });
 
   it("refuses a second endpoint on the same URL", async () => {
@@ -117,8 +116,7 @@ describe("listing webhooks", () => {
 
     const [hook] = await listWebhooks(ctx);
     expect(hook.events).toHaveLength(2);
-    // Only one of the two can currently fire.
-    expect(hook.liveEvents).toBe(1);
+    expect(hook.liveEvents).toBe(2);
   });
 
   it("flags an event that no longer exists in the app", async () => {

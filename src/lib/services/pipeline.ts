@@ -1,11 +1,13 @@
 import "server-only";
 import { db } from "@/lib/db";
 import type { AuthContext } from "@/lib/auth/context";
-import { leadVisibilityFilter } from "@/lib/auth/context";
+import { assertPermission, dealVisibilityFilter, leadVisibilityFilter } from "@/lib/auth/context";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { recordActivity, recordAudit } from "@/lib/services/audit";
 import { enqueue } from "@/lib/queue/producer";
 import { JOB } from "@/lib/queue/jobs";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 const DAY = 86_400_000;
 
@@ -165,8 +167,9 @@ export async function moveDeal(
   ctx: AuthContext,
   opts: { dealId: string; toStageId: string; sortOrder?: number; lostReason?: string }
 ) {
+  assertPermission(ctx, PERMISSIONS.PIPELINE_EDIT);
   const deal = await db.deal.findFirst({
-    where: { id: opts.dealId, workspaceId: ctx.workspaceId, deletedAt: null },
+    where: { id: opts.dealId, workspaceId: ctx.workspaceId, deletedAt: null, ...dealVisibilityFilter(ctx) },
     include: { stage: true },
   });
   if (!deal) throw new DealMoveError("That deal no longer exists.");
@@ -225,6 +228,10 @@ export async function moveDeal(
   });
 
   if (toStage.id !== deal.stageId) {
+    const payload = { dealId: deal.id, fromStage: deal.stage.name, toStage: toStage.name, valueInr: Number(deal.valueInr), companyId: updated.companyId };
+    await emitWebhookEvent(ctx.workspaceId, "deal.stage_changed", payload);
+    if (toStage.isWon) await emitWebhookEvent(ctx.workspaceId, "deal.won", payload);
+    if (toStage.isLost) await emitWebhookEvent(ctx.workspaceId, "deal.lost", { ...payload, lostReason: opts.lostReason ?? deal.lostReason });
     // Dwell time restarted and the stage probability changed, so the risk view
     // and the worklist ranking are both stale.
     await enqueue(

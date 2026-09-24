@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Brain,
@@ -17,20 +18,26 @@ import {
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ApiError, activityApi, tasksApi } from "@/lib/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/ui/states";
-import { formatAge, formatDate, formatInrCompact, isPast } from "@/lib/format";
+import { formatAge, formatDate, formatInrCompact, formatRelative, isPast } from "@/lib/format";
 import { AddNote, CreateDealDialog } from "@/components/leads/dossier/lead-actions";
+import { CreateTaskDialog } from "@/components/tasks/create-task-dialog";
 import { TASK_PRIORITY } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
+import { DealMoney } from "@/components/leads/dossier/deal-money";
 
 /** §113 — ranked candidate actions, each with its reasoning. */
 export function NextBestActions({
+  leadId,
   actions,
 }: {
+  leadId: string;
   actions: {
     id: string;
     action: string;
@@ -40,6 +47,7 @@ export function NextBestActions({
     score: number;
     channel: string | null;
     expectedImpactInr: number | null;
+    chosenAt?: string | null;
   }[];
 }) {
   if (actions.length === 0) return null;
@@ -93,34 +101,75 @@ export function NextBestActions({
                   Influences {formatInrCompact(a.expectedImpactInr)}
                 </p>
               ) : null}
-              {i === 0 ? (
-                <div className="mt-1.5 flex gap-1.5">
-                  <Button
-                    variant="primary"
-                    size="xs"
-                    onClick={() => toast("Action execution lands in Phase 4")}
-                  >
-                    Do it
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() =>
-                      toast("Feedback recorded locally", {
-                        description:
-                          "The schema stores accept/reject per recommendation to improve future ranking.",
-                      })
-                    }
-                  >
-                    Not this
-                  </Button>
-                </div>
-              ) : null}
+              {i === 0 ? <RecommendationDecision leadId={leadId} action={a} /> : null}
             </li>
           ))}
         </ul>
       </CardContent>
     </Card>
+  );
+}
+
+
+/**
+ * "Do it" records the choice and puts the action in My Queue as a task, so it is
+ * tracked work rather than a click. "Not this" stores the rejection and its
+ * reason; the nightly recompute keeps it and does not offer that action again.
+ */
+function RecommendationDecision({ leadId, action }: { leadId: string; action: { id: string; label: string; channel: string | null; chosenAt?: string | null } }) {
+  const router = useRouter();
+  const [pending, setPending] = React.useState<"chosen" | "rejected" | null>(null);
+  const [rejecting, setRejecting] = React.useState(false);
+  const [reason, setReason] = React.useState("");
+
+  if (action.chosenAt) {
+    return <p className="mt-1.5 text-2xs text-brand-text">Chosen — it is in My Queue.</p>;
+  }
+
+  async function choose() {
+    setPending("chosen");
+    try {
+      await activityApi.decideRecommendation(action.id, "chosen");
+      await tasksApi.create({ title: action.label, leadId, priority: "HIGH", ...(action.channel ? { channel: action.channel } : {}), dueAt: new Date(Date.now() + 86_400_000).toISOString() });
+      toast.success("Added to My Queue", { description: `${action.label}, due tomorrow.` });
+      router.refresh();
+    } catch (err) {
+      toast.error("Couldn't take that action", { description: err instanceof ApiError ? err.message : "Nothing was changed." });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function reject() {
+    setPending("rejected");
+    try {
+      await activityApi.decideRecommendation(action.id, "rejected", reason.trim() || undefined);
+      toast.success("Recommendation dismissed", { description: "It will not be suggested again for this lead." });
+      router.refresh();
+    } catch (err) {
+      toast.error("Couldn't record that", { description: err instanceof ApiError ? err.message : "Nothing was changed." });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  if (rejecting) {
+    return (
+      <div className="mt-1.5 space-y-1.5">
+        <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={400} placeholder="Why not? (optional)" className="h-7 text-xs" aria-label="Why not this recommendation" autoFocus />
+        <div className="flex gap-1.5">
+          <Button variant="secondary" size="xs" loading={pending === "rejected"} onClick={reject}>Dismiss it</Button>
+          <Button variant="ghost" size="xs" disabled={!!pending} onClick={() => setRejecting(false)}>Cancel</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 flex gap-1.5">
+      <Button variant="primary" size="xs" loading={pending === "chosen"} onClick={choose}>Do it</Button>
+      <Button variant="ghost" size="xs" disabled={!!pending} onClick={() => setRejecting(true)}>Not this</Button>
+    </div>
   );
 }
 
@@ -246,7 +295,7 @@ export function DealsPanel({
                   <p className="mt-1 flex items-center gap-1 text-2xs text-secondary">
                     <Clock className="size-2.5" />
                     {d.nextActionLabel}
-                    {d.nextActionAt ? ` · ${formatAge(d.nextActionAt)}` : ""}
+                    {d.nextActionAt ? ` · ${formatRelative(d.nextActionAt)}` : ""}
                   </p>
                 ) : d.status === "OPEN" ? (
                   <p className="mt-1 text-2xs text-warning-text">No next action scheduled</p>
@@ -256,6 +305,10 @@ export function DealsPanel({
                   <p className="mt-1 rounded bg-danger-subtle px-2 py-1 text-2xs text-danger-text">
                     Lost: {d.lostReason}
                   </p>
+                ) : null}
+                {d.status === "WON" ? <DealMoney dealId={d.id} /> : null}
+                {d.status !== "LOST" ? (
+                  <Link href={`/teamcollab/${d.id}`} className="mt-1 inline-block text-2xs text-brand-text hover:underline">Plan: sales → delivery → cash</Link>
                 ) : null}
 
                 {d.risks.length > 0 ? (
@@ -346,13 +399,7 @@ export function TasksAndNotes({
         {tab === "notes" && leadId ? (
           <AddNote leadId={leadId} />
         ) : (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => toast("Task creation from here lands with My Queue")}
-          >
-            Add
-          </Button>
+          <CreateTaskDialog leadId={leadId} trigger="ghost" label="Add" />
         )}
       </CardHeader>
 
@@ -363,7 +410,7 @@ export function TasksAndNotes({
               compact
               icon={ListChecks}
               title="No tasks"
-              description="Tasks appear automatically when a reply arrives, a deal stalls, or a follow-up comes due."
+              description="Add one with Add, or take a recommendation with Do it. Tasks also appear when a reply arrives or a deal stalls."
             />
           ) : (
             <ul className="space-y-1.5">
@@ -400,7 +447,7 @@ export function TasksAndNotes({
                       {t.owner ? `${t.owner.name} · ` : ""}
                       {t.dueAt ? (
                         <span className={overdue ? "text-danger-text" : undefined}>
-                          due {formatAge(t.dueAt)}
+                          due {formatRelative(t.dueAt)}
                         </span>
                       ) : (
                         "no due date"
@@ -599,20 +646,16 @@ export function CompanyPanel({
         </div>
       </CardContent>
 
-      <CardFooter>
-        <Button
-          variant="ai"
-          size="sm"
-          className="w-full"
-          onClick={() =>
-            toast("Deep research needs an AI provider key", {
-              description:
-                "It would cost 2 points and return cited person, company, opportunity and outreach sections. Nothing was charged.",
-            })
-          }
-        >
-          <Brain />
-          Deep research · 2 points
+      <CardFooter className="flex-col items-start gap-1">
+        {/* External research (funding, news, hiring) has no adapter; say so instead of offering a button that cannot run. */}
+        <p className="text-2xs leading-relaxed text-muted">
+          Research from outside sources is not built yet, so nothing here spends points.
+        </p>
+        <Button variant="secondary" size="sm" asChild>
+          <Link href="/research">
+            <Brain />
+            Research from your own data
+          </Link>
         </Button>
       </CardFooter>
     </Card>

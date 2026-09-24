@@ -46,6 +46,12 @@ const RESTORABLE: Record<string, { label: string; restore: (id: string) => Promi
       await db.playbook.update({ where: { id }, data: { deletedAt: null, isActive: false } });
     },
   },
+  Competitor: {
+    label: "Competitor",
+    restore: async (id) => {
+      await db.competitor.update({ where: { id }, data: { deletedAt: null } });
+    },
+  },
   List: {
     label: "List",
     restore: async (id) => {

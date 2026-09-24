@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
-import { MutationError, loadScoped, mutate } from "@/lib/services/mutate";
+import { MutationError, loadScoped, mutate, softDelete } from "@/lib/services/mutate";
 import { leadFilterSchema } from "@/lib/leads/filter";
 import { listLeads } from "@/lib/services/leads";
 
@@ -168,6 +168,8 @@ export async function deleteList(ctx: AuthContext, id: string) {
 
   return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
     await db.list.update({ where: { id }, data: { deletedAt: new Date() } });
+    // Indexed for the recycle bin, so the list can be restored until its purge date.
+    await softDelete(ctx, { objectType: "List", objectId: id, label: list.name });
     return {
       result: {
         note: list.isDynamic
@@ -182,6 +184,54 @@ export async function deleteList(ctx: AuthContext, id: string) {
       },
     };
   });
+}
+
+const scopedStaticList = async (ctx: AuthContext, id: string) => {
+  const list = await loadScoped(() => db.list.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } }), "That list");
+  if (list.isDynamic) throw new MutationError("A smart list holds whatever its filter matches, so leads can't be added or removed by hand.", "dynamic_list", 422);
+  return list;
+};
+
+/** Adds leads to a static list. Only leads this person can see are added; the rest are reported, not added. */
+export async function addLeadsToList(ctx: AuthContext, listId: string, raw: unknown) {
+  const leadIds = z.array(z.string().uuid()).min(1, "Pick at least one lead.").max(500).parse(raw);
+  const list = await scopedStaticList(ctx, listId);
+  const visible = await db.lead.findMany({ where: { id: { in: [...new Set(leadIds)] }, workspaceId: ctx.workspaceId, deletedAt: null, ...leadVisibilityFilter(ctx) }, select: { id: true } });
+  return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
+    const { count } = await db.listMember.createMany({ data: visible.map((l) => ({ workspaceId: ctx.workspaceId, listId, leadId: l.id, addedById: ctx.userId })), skipDuplicates: true });
+    await db.list.update({ where: { id: listId }, data: { updatedAt: new Date() } });
+    const notFound = new Set(leadIds).size - visible.length;
+    return {
+      result: { added: count, alreadyIn: visible.length - count, notFound, note: `${count} added to ${list.name}${visible.length - count ? `; ${visible.length - count} already there` : ""}${notFound ? `; ${notFound} not found or not visible to you` : ""}.` },
+      log: { action: "list.members_added", objectType: "List", objectId: listId, after: { added: count, requested: leadIds.length } },
+    };
+  });
+}
+
+export async function removeLeadFromList(ctx: AuthContext, listId: string, leadId: string) {
+  z.string().uuid().parse(leadId);
+  await scopedStaticList(ctx, listId);
+  await loadScoped(() => db.lead.findFirst({ where: { id: leadId, workspaceId: ctx.workspaceId, deletedAt: null, ...leadVisibilityFilter(ctx) }, select: { id: true } }), "That lead");
+  return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
+    const { count } = await db.listMember.deleteMany({ where: { workspaceId: ctx.workspaceId, listId, leadId } });
+    return { result: { removed: count }, log: { action: "list.member_removed", objectType: "List", objectId: listId, after: { leadId } } };
+  });
+}
+
+/** One list and the leads in it that this person can see. A smart list runs its filter. */
+export async function getList(ctx: AuthContext, id: string) {
+  if (!z.string().uuid().safeParse(id).success) return null;
+  const list = await db.list.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null } });
+  if (!list) return null;
+  if (list.isDynamic) {
+    const parsed = leadFilterSchema.safeParse(list.filterJson);
+    const page = parsed.success ? await listLeads(ctx, { ...parsed.data, page: 1, pageSize: 200 }) : null;
+    return toPlain({ id: list.id, name: list.name, description: list.description, isDynamic: true, broken: !parsed.success, filter: list.filterJson, total: page?.total ?? 0, leads: page?.rows ?? [] });
+  }
+  // The Leads query already filters by list membership in SQL, with visibility applied.
+  const page = await listLeads(ctx, leadFilterSchema.parse({ listId: id, page: 1, pageSize: 200 }));
+  const rows = page.rows; const total = page.total;
+  return toPlain({ id: list.id, name: list.name, description: list.description, isDynamic: false, broken: false, filter: null, total, leads: rows });
 }
 
 /**

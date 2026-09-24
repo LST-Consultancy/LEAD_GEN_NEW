@@ -39,9 +39,11 @@ export function CalendarSettingsView({
       </div>
 
       {active ? (
-        <div className="rounded-lg border border-success-border bg-success-subtle px-3 py-2.5 text-xs text-success-text">
-          <Check className="mr-1 inline size-3.5" />
-          <strong>{active}</strong> is credentialled.
+        <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">
+          <AlertTriangle className="mr-1 inline size-3.5" />
+          A <strong>{active}</strong> credential is present, but no calendar adapter is built, so
+          nothing creates an event or sends an invite yet. (The Google client id is also what Gmail
+          sending uses, so its presence alone does not mean a calendar is connected.)
         </div>
       ) : (
         <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">

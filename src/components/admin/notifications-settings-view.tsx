@@ -1,6 +1,11 @@
 "use client";
 
-import { AlertTriangle, Bell, Info } from "lucide-react";
+import * as React from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Bell, Info } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { ApiError, api } from "@/lib/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -10,9 +15,8 @@ import type { NotificationKindStat } from "@/lib/services/notification-settings"
 /**
  * §85 — notification settings.
  *
- * No preference store exists, so there are no switches. Instead the screen
- * answers the question a preferences page is really for — "which of these is
- * too noisy?" — with your own counts, which is knowable today.
+ * Per-kind in-app switches, beside your own counts for each kind — the number
+ * that tells you what is worth muting.
  */
 export function NotificationsSettingsView({
   kinds,
@@ -37,14 +41,6 @@ export function NotificationsSettingsView({
         </p>
       </div>
 
-      <div className="flex gap-2 rounded-md border border-warning-border bg-warning-subtle p-2.5 text-2xs leading-relaxed text-warning-text">
-        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-        <span>
-          <strong>Per-kind muting is not built.</strong> There is nowhere to store the preference
-          yet, so rather than switches that forget what you set, this shows your real volume — the
-          number you would use to decide what to mute.
-        </span>
-      </div>
 
       <Card>
         <CardHeader className="flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -85,6 +81,7 @@ export function NotificationsSettingsView({
                   <th className="pb-1.5 text-right font-semibold">Received</th>
                   <th className="pb-1.5 text-right font-semibold">Unread</th>
                   <th className="pb-1.5 text-right font-semibold">Last</th>
+                  <th className="pb-1.5 text-right font-semibold">In app</th>
                 </tr>
               </thead>
               <tbody>
@@ -130,6 +127,9 @@ export function NotificationsSettingsView({
                     <td className="py-1.5 text-right text-2xs text-muted">
                       {k.lastAt ? formatAge(k.lastAt) : "never"}
                     </td>
+                    <td className="py-1.5 text-right">
+                      <MuteSwitch kind={k.kind} label={k.label} muted={k.muted} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -146,4 +146,22 @@ export function NotificationsSettingsView({
       </p>
     </div>
   );
+}
+
+function MuteSwitch({ kind, label, muted }: { kind: string; label: string; muted: boolean }) {
+  const router = useRouter();
+  const [on, setOn] = React.useState(!muted);
+  const [pending, setPending] = React.useState(false);
+  async function toggle(next: boolean) {
+    setOn(next); setPending(true);
+    try {
+      await api.put("/api/notification-preferences", { kind, muted: !next });
+      toast.success(next ? `${label} on` : `${label} muted`, { description: next ? undefined : "The events still appear in activity; only the notification is skipped." });
+      router.refresh();
+    } catch (err) {
+      setOn(!next);
+      toast.error("Not saved", { description: `${err instanceof ApiError ? err.message : "The server didn't save it."} Put back as it was.` });
+    } finally { setPending(false); }
+  }
+  return <Switch aria-label={`${label} notifications`} checked={on} disabled={pending} onCheckedChange={(c) => void toggle(c)} />;
 }

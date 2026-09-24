@@ -104,13 +104,16 @@ export function ProposalsView({
 
   return (
     <div className="flex flex-col gap-3">
-      <div>
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1">
         <h1 className="text-lg font-semibold text-primary">Proposals</h1>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
           Each one has a private link a customer can read and answer. Views, acceptances and
           declines are recorded as they happen, so the pipeline reflects what the buyer actually
           did rather than what was reported.
         </p>
+        </div>
+        <Button variant="primary" size="sm" asChild><Link href="/proposals/new">New proposal</Link></Button>
       </div>
 
       {mismatched.length > 0 ? (
@@ -122,7 +125,7 @@ export function ProposalsView({
               : `${mismatched.length} proposals have totals that do not match their line items`}
           </strong>
           . Nothing has been changed automatically — altering a figure a customer may already
-          have seen would be worse than the mismatch. Open and re-save each one to recompute.
+          have seen would be worse than the mismatch. Open each one with Edit, check the lines, and save to recompute.
         </div>
       ) : null}
 
@@ -343,7 +346,22 @@ function ProposalCard({
               onClick={() => void act(() => api.post(`/api/proposals/${proposal.id}/send`, {}))}
             >
               <Send />
-              {emailConfigured ? "Send" : "Make link live"}
+              Make link live
+            </Button>
+          ) : null}
+          {!isLive && emailConfigured ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void act(() => api.post(`/api/proposals/${proposal.id}/send`, { byEmail: true }))}
+            >
+              Make live and email
+            </Button>
+          ) : null}
+          {proposal.storedState !== "ACCEPTED" ? (
+            <Button size="sm" variant="ghost" asChild>
+              <Link href={`/proposals/${proposal.id}/edit`}>Edit</Link>
             </Button>
           ) : null}
         </div>

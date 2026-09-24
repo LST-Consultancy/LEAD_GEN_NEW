@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, FileText, Info, Percent } from "lucide-react";
+import { FileText, Info, Percent } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
 import { formatAge, formatNumber, formatPercent } from "@/lib/format";
 import type { ProposalNorms } from "@/lib/services/proposal-setup";
+import { ProposalDefaultsForm, type DefaultsValue } from "@/components/admin/proposal-defaults-form";
 
 /**
  * §60 — proposal setup.
@@ -16,7 +17,7 @@ import type { ProposalNorms } from "@/lib/services/proposal-setup";
  * tax rates in use is a real problem that a settings screen with one input box
  * would have hidden.
  */
-export function ProposalSetupView({ norms }: { norms: ProposalNorms }) {
+export function ProposalSetupView({ norms, defaults, canEdit }: { norms: ProposalNorms; defaults: DefaultsValue; canEdit: boolean }) {
   const mixedRates = norms.taxRates.length > 1;
 
   return (
@@ -24,19 +25,12 @@ export function ProposalSetupView({ norms }: { norms: ProposalNorms }) {
       <div>
         <h1 className="text-lg font-semibold text-primary">Proposal Setup</h1>
         <p className="mt-0.5 max-w-2xl text-xs text-secondary">
-          Each proposal carries its own tax rate, terms and validity — there is no workspace
-          default that overrides them. So this shows what yours actually use.
+          New proposals start from the defaults below; each one then keeps its own tax rate,
+          terms and validity. The report underneath shows what your proposals actually use.
         </p>
       </div>
 
-      <div className="flex gap-2 rounded-md border border-warning-border bg-warning-subtle p-2.5 text-2xs leading-relaxed text-warning-text">
-        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-        <span>
-          <strong>Editable workspace defaults are not built.</strong> Nothing here changes a future
-          proposal. Your real commercial guardrails belong in the Knowledge Base, where drafting
-          will read them.
-        </span>
-      </div>
+      <ProposalDefaultsForm initial={defaults} canEdit={canEdit} />
 
       {norms.total === 0 ? (
         <Card>

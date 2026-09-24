@@ -58,7 +58,12 @@ not chosen, and they pass in all-pairs mode in both themes.
 | A new agent tool | `lib/ai/tools.ts` — an agent may only hold tools declared there |
 | A machine-callable endpoint | `lib/api/manifest.ts`, then `resolveCaller` in the route |
 | A new API scope | `lib/auth/api-scopes.ts`, with `requires` *and* `grants` |
-| A new webhook event | `lib/services/webhooks.ts`, with honest `emitted` |
+| A new webhook event | `lib/services/webhooks.ts`, with honest `emitted`, and an `emitWebhookEvent` call where it happens |
+| Raising a notification | `raiseNotification` in `lib/services/notify.ts` — never `db.notification.create` |
+| Money on a won deal | `lib/services/deal-money.ts` — invoices, payments, adjustments; never edit or delete an entry |
+| A LinkedIn query, depth preset or date mapping | `lib/opportunities/linkedin-plan.ts` — pure, shared by the search screen and the worker |
+| A rule that sets a LinkedIn post aside | `lib/opportunities/linkedin-qualify.ts`, with one reason in `DISCOVERY_REASON` |
+| LinkedIn pagination and stopping | `lib/opportunities/linkedin-run.ts` — pure; I/O is injected |
 
 Prisma `Decimal` and `Date` must not cross into components. Convert once at the
 service boundary with `toPlain()` from `lib/serialize.ts`.
@@ -282,6 +287,37 @@ before believing that one.
 - **A body line beginning with `.` must be doubled before DATA.** A lone `.` on
   its own line is what ends the message, so an unescaped one truncates it
   exactly there. `dotStuff` in `lib/outreach/mime.ts`.
+- **A capability flag is not a reader.** `RECEIVE_BUILT` (replies) and
+  `CALENDAR_ADAPTER_BUILT` sit beside `ADAPTER_BUILT` for the same reason:
+  SMTP *can* be read over IMAP and a Google client id *can* drive a calendar,
+  but nothing here does either. Treating the capability as the feature let
+  stop-on-reply sequences activate with no reader, and told users bookings
+  were "synced to your calendar" because Gmail's sending credential was set.
+- **"Emitted" needs an emitter.** The webhook catalogue once marked eight
+  events emitted while only the Test button created deliveries. Declaring an
+  event means calling `emitWebhookEvent` where it happens; the test in
+  `tests/webhook-events.test.ts` drives the real actions and counts deliveries.
+- **Deals follow lead visibility in writes, not just reads.** The board
+  filtered a rep to their own deals while update, move and delete took any id
+  in the workspace. Every deal lookup before a write includes
+  `dealVisibilityFilter(ctx)`; so do proposal and booking links to a deal.
+- **Only email steps send.** An automatic WhatsApp or LinkedIn sequence step
+  would be queued as a message to the lead's email address; `validateShape`
+  refuses it, and the builder makes those steps manual tasks.
+- **`total_posts` overrides `page_number`** on the LinkedIn actor. Sending both
+  re-reads the same pages; this app paginates manually and never sends it. The
+  actor's `date_filter` stops at `past-month`, so a longer window runs
+  unfiltered, newest first, and is checked locally — never a shorter window.
+- **A LinkedIn run is billed per page, so record the run before waiting on it.**
+  `fetchLinkedInPage` starts an async Apify run and saves its id in the search
+  checkpoint first; a retry reads that run's dataset. Going back to
+  `run-sync-get-dataset-items` makes every redelivery pay again.
+- **One post, one outcome.** The LinkedIn funnel reconciles only because every
+  unique post gets exactly one label (`qualified_*`, `review:*`, `rejected:*`).
+  A new rule must return a reason, not add a second count.
+- **Unknown is not a match.** A post that does not state company size, location
+  or industry goes to review (or is rejected under strict filters), and a
+  reviewer's qualification records those fields as still unknown.
 - **A credential is not an adapter.** `ADAPTER_BUILT` in
   `lib/outreach/provider.ts` is separate from `isEmailConfigured()`, because a
   key for a provider with no adapter makes every screen say "connected" and
@@ -306,9 +342,20 @@ before believing that one.
   `vitest.config.mts`.
 - **dnd-kit needs a stable `DndContext id`** or its generated ARIA ids mismatch
   between server and client renders.
-- **Integration tests share one database** and truncate tables, so
-  `fileParallelism` is off and `tests/setup.ts` refuses a non-local
-  `DATABASE_URL`.
+- **Tests never touch the working database.** The `DATABASE_URL` database
+  holds real customer data. `scripts/test-env.mjs` is the one definition of the
+  test environment: `<name>_test` (or `TEST_DATABASE_URL`) and Redis db 15 (or
+  `TEST_REDIS_URL`). Vitest, Playwright and `npm run db:test:*` all use it, and
+  it refuses anything not local and named `*_test`. Integration tests still
+  share that one test database, so `fileParallelism` stays off. Before this
+  existed, a full run leaked 45 fixture users and 7 public "Test plan" rows
+  into the live billing catalogue.
+- **`npm run db:seed` deletes every workspace and user.** It refuses when the
+  target holds any account outside the reserved `.example`/`.invalid`
+  domains. Seed the test database with `npm run db:test:prepare`.
+- **E2E runs its own server** on :3100 against the test database, with build
+  output in `.next-opportunity-e2e`, so it cannot sign in to or mutate the app
+  on :3000.
 - **Streaming and 404s**: `notFound()` after the shell has flushed yields a 200
   status with 404 content. That's a Next.js streaming trade-off, not a bug.
 - **The worker needs `server-only` aliased.** It runs under tsx, not Next's
@@ -319,6 +366,12 @@ before believing that one.
 - **BullMQ rejects a custom job id containing `:`** — every enqueue then fails
   silently and reports as "queue unreachable". `safeJobId()` in
   `lib/queue/producer.ts` sanitises it.
+- **A schedule outlives its workspace.** Deleting a workspace left its
+  schedulers firing hollow jobs (no name, no payload) that failed as "Job
+  undefined received no workspaceId". `validateJobEnvelope` refuses those
+  without retry, and the worker removes schedulers not in the expected set on
+  boot — including the pre-`safeJobId` `name:workspace` ids, which ran every
+  job twice.
 - **Dedupe keys must be time-bucketed.** A permanent key made a second
   legitimate rescore a no-op while the UI promised "101 leads will be
   recomputed". `bucketed()` scopes the key to a window.

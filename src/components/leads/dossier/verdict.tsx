@@ -10,6 +10,7 @@ import { FitRadar, type RadarDimension } from "@/components/leads/dossier/fit-ra
 import { formatAge, formatInrCompact } from "@/lib/format";
 import type { IntentKey } from "@/lib/vocab";
 import { cn } from "@/lib/utils";
+import { angle as assessAngle, authorityState, readinessSummary, risks as assessRisks, whyFit as assessWhyFit } from "@/lib/leads/assessment";
 
 type ReadinessItem = { code: string; label: string; state: string; evidence: string | null };
 
@@ -64,10 +65,11 @@ export function AiVerdict({
           : "border-border bg-surface-sunken text-secondary";
 
   // Each of these is a sentence assembled from a specific stored number.
-  const whyFit = buildWhyFit(byKey, isDecisionMaker);
+  const authority = authorityState(byKey, isDecisionMaker);
+  const whyFit = assessWhyFit(byKey, authority);
   const whyNow = buildWhyNow(byKey, latestSignalAt, signalCount);
-  const risks = buildRisks(byKey, readiness, hasReplied, estimatedBudgetInr);
-  const angle = buildAngle(byKey, surfacedReason);
+  const risks = assessRisks(byKey, readiness, hasReplied, estimatedBudgetInr);
+  const angle = assessAngle(byKey, surfacedReason);
 
   return (
     <Card>
@@ -133,19 +135,6 @@ function VerdictSection({
   );
 }
 
-function buildWhyFit(d: Record<string, number>, isDecisionMaker: boolean): string {
-  const parts: string[] = [];
-  if (d.fit >= 70) parts.push("They match your ICP closely on industry, size and location");
-  else if (d.fit >= 40) parts.push("Partial ICP match — some dimensions line up, others don't");
-  else parts.push("Weak ICP match on the criteria you defined");
-
-  if (isDecisionMaker) parts.push("and this person can authorise the purchase");
-  else if (d.authority >= 50) parts.push("and this person has meaningful influence");
-  else parts.push("but this person is unlikely to be the decision maker");
-
-  return `${parts.join(" ")}.`;
-}
-
 function buildWhyNow(
   d: Record<string, number>,
   latestSignalAt: string | null,
@@ -164,42 +153,6 @@ function buildWhyNow(
   return `${signalCount} signal${signalCount === 1 ? "" : "s"} on record, most recent ${freshness}, but none names a timeline. Treat as interest rather than an active project.`;
 }
 
-function buildRisks(
-  d: Record<string, number>,
-  readiness: ReadinessItem[],
-  hasReplied: boolean,
-  budget: number | null
-): string {
-  const risks: string[] = [];
-  if (!budget && d.budget < 40) risks.push("no budget has been confirmed");
-  if (d.authority < 45) risks.push("the decision maker has not been identified");
-  if (d.reachability < 30) risks.push("there is no reliable way to contact them yet");
-  if (!hasReplied && d.engagement === 0) risks.push("they have never responded to you");
-  if (d.recency < 30) risks.push("the evidence is going stale");
-  const unresolved = readiness.filter((r) => r.state === "no").length;
-  if (unresolved >= 3) risks.push(`${unresolved} readiness checks are failing`);
-
-  if (risks.length === 0) {
-    return "Nothing material is missing. Budget, authority, need and reachability are all evidenced.";
-  }
-  return `${risks[0].charAt(0).toUpperCase()}${risks[0].slice(1)}${
-    risks.length > 1 ? `; ${risks.slice(1).join("; ")}` : ""
-  }.`;
-}
-
-function buildAngle(d: Record<string, number>, surfacedReason: string): string {
-  if (d.urgency >= 60) {
-    return `Lead with their deadline, not your capability. The signal already told you what they need — reference it directly and make the first reply short enough to answer on a phone.`;
-  }
-  if (d.intent >= 50) {
-    return `Open with the specific problem named in their signal: "${surfacedReason.slice(0, 90)}${surfacedReason.length > 90 ? "…" : ""}". A comparable case study will outperform a feature list.`;
-  }
-  if (d.fit >= 60) {
-    return "Good fit but no demonstrated intent. Add them to Radar and wait for a behavioural signal rather than spending credibility on a cold approach now.";
-  }
-  return "Not enough evidence to justify outreach. Leave them in the database and let the radar surface them if something changes.";
-}
-
 const READINESS_ICON: Record<
   string,
   { icon: React.ComponentType<{ className?: string }>; tone: string; label: string }
@@ -213,6 +166,7 @@ const READINESS_ICON: Record<
 /** §25 — the readiness checklist, with the evidence for each line. */
 export function ReadinessChecklist({ items }: { items: ReadinessItem[] }) {
   const confirmed = items.filter((i) => i.state === "yes").length;
+  const summary = readinessSummary(items);
 
   return (
     <Card>
@@ -220,14 +174,13 @@ export function ReadinessChecklist({ items }: { items: ReadinessItem[] }) {
         <div>
           <CardTitle>Deal readiness</CardTitle>
           <p className="mt-0.5 text-2xs text-muted">
-            {confirmed} of {items.length} confirmed · updated as evidence arrives
+            {summary.assessed
+              ? `${confirmed} of ${items.length} confirmed · updated as evidence arrives`
+              : "No readiness checks have been run for this lead yet"}
           </p>
         </div>
-        <Badge
-          variant={confirmed >= items.length - 1 ? "success" : confirmed >= 3 ? "warning" : "neutral"}
-          size="lg"
-        >
-          {confirmed}/{items.length}
+        <Badge variant={summary.tone} size="lg">
+          {summary.label}
         </Badge>
       </CardHeader>
       <CardContent>

@@ -2,17 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { toast } from "sonner";
 import {
   Check,
   ChevronDown,
   Clock,
   Mail,
   MessageCircle,
-  MoreHorizontal,
   Phone,
   Sparkles,
-  UserPlus,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,15 +17,10 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/ui/states";
 import { Tooltip } from "@/components/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { IntentBadge, ScorePill, TierBadge } from "@/components/domain/indicators";
 import { formatAge, formatInrCompact } from "@/lib/format";
 import { TASK_PRIORITY, type IntentKey, type TierKey } from "@/lib/vocab";
+import { TaskDelegateButton, TaskSnoozeMenu, taskDoItHref, useTaskCompletion } from "@/components/tasks/task-actions";
 import { cn } from "@/lib/utils";
 
 export type WorklistItem = {
@@ -72,26 +64,12 @@ const CHANNEL_ICON: Record<string, React.ComponentType<{ className?: string }>> 
  * interrogate is just an assertion.
  */
 export function Worklist({ items }: { items: WorklistItem[] }) {
-  const [completed, setCompleted] = React.useState<Set<string>>(new Set());
+  const { completed, complete: completeTask } = useTaskCompletion();
   const [expanded, setExpanded] = React.useState<string | null>(items[0]?.id ?? null);
 
   const visible = items.filter((i) => !completed.has(i.id));
 
-  function complete(item: WorklistItem) {
-    setCompleted((prev) => new Set(prev).add(item.id));
-    toast.success("Marked done", {
-      description: item.title,
-      action: {
-        label: "Undo",
-        onClick: () =>
-          setCompleted((prev) => {
-            const next = new Set(prev);
-            next.delete(item.id);
-            return next;
-          }),
-      },
-    });
-  }
+  const complete = (item: WorklistItem) => void completeTask(item);
 
   return (
     <Card>
@@ -262,21 +240,14 @@ export function Worklist({ items }: { items: WorklistItem[] }) {
 
                     {/* Actions */}
                     <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="hidden sm:inline-flex"
-                        onClick={() =>
-                          item.lead
-                            ? toast("Action composer lands in Phase 4", {
-                                description: `Would open ${item.channel?.toLowerCase() ?? "the right channel"} for ${item.lead.name}.`,
-                              })
-                            : toast("No lead attached to this task")
-                        }
-                      >
-                        {Icon ? <Icon /> : null}
-                        Do it
-                      </Button>
+                      {taskDoItHref(item) ? (
+                        <Button variant="secondary" size="sm" className="hidden sm:inline-flex" asChild>
+                          <Link href={taskDoItHref(item)!}>
+                            {Icon ? <Icon /> : null}
+                            Do it
+                          </Link>
+                        </Button>
+                      ) : null}
 
                       <Tooltip content="Mark complete">
                         <Button
@@ -289,29 +260,15 @@ export function Worklist({ items }: { items: WorklistItem[] }) {
                         </Button>
                       </Tooltip>
 
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon-sm" aria-label="More actions">
-                            <MoreHorizontal />
+                      {item.lead ? (
+                        <Tooltip content="Draft a reply">
+                          <Button variant="ghost" size="icon-sm" asChild aria-label="Draft a reply">
+                            <Link href={`/leads/${item.lead.id}?do=email`}><Sparkles /></Link>
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onSelect={() => toast("Draft generation needs an AI provider key")}
-                          >
-                            <Sparkles />
-                            Draft a reply
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => toast("Snoozing lands with My Queue")}>
-                            <Clock />
-                            Snooze
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => toast("Delegation lands with TeamCollab")}>
-                            <UserPlus />
-                            Delegate
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                        </Tooltip>
+                      ) : null}
+                      <TaskSnoozeMenu taskId={item.id} size="xs" />
+                      <TaskDelegateButton taskId={item.id} size="xs" />
 
                       <button
                         type="button"

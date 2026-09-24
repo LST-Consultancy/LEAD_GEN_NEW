@@ -1,11 +1,12 @@
 import "server-only";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
+import { type AuthContext, dealVisibilityFilter, leadVisibilityFilter } from "@/lib/auth/context";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate } from "@/lib/services/mutate";
 import { localDateKey } from "@/lib/proposals/money";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 /**
  * Meetings.
@@ -54,6 +55,19 @@ export function activeCalendarProvider(): string | null {
 
 export function isCalendarConfigured(): boolean {
   return activeCalendarProvider() !== null;
+}
+
+/**
+ * Whether a calendar adapter exists to act on that credential. None does. The
+ * Google client id is also Gmail's sending credential, so connecting Gmail made
+ * every booking say "synced to your calendar" and every cancellation say "the
+ * calendar event was removed" while nothing touched a calendar.
+ */
+export const CALENDAR_ADAPTER_BUILT: Record<string, boolean> = { google: false, microsoft: false, caldav: false };
+
+export function canSyncCalendar(): boolean {
+  const active = activeCalendarProvider();
+  return active !== null && CALENDAR_ADAPTER_BUILT[active] === true;
 }
 
 export const CALENDAR_NOT_CONFIGURED =
@@ -397,6 +411,16 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
     );
   }
 
+  if (input.dealId) {
+    const deal = await loadScoped(
+      () => db.deal.findFirst({ where: { id: input.dealId, workspaceId: ctx.workspaceId, deletedAt: null, ...dealVisibilityFilter(ctx) }, select: { leadId: true } }),
+      "That deal"
+    );
+    if (input.leadId && deal.leadId && deal.leadId !== input.leadId) {
+      throw new MutationError("That deal belongs to a different lead from this meeting.", "deal_lead_mismatch", 422);
+    }
+  }
+
   // Warn about a clash rather than blocking it: double-booking is sometimes
   // deliberate, and this app is not the source of truth for the calendar.
   const clash = await db.booking.findFirst({
@@ -431,6 +455,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
         provider: null,
       },
     });
+    await emitWebhookEvent(ctx.workspaceId, "meeting.booked", { bookingId: booking.id, leadId: booking.leadId, dealId: booking.dealId, startsAt: booking.startsAt.toISOString(), endsAt: booking.endsAt.toISOString(), timezone: booking.timezone });
 
     return {
       result: {
@@ -438,7 +463,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
         clash: clash
           ? `You already have "${clash.title}" overlapping this slot. Recorded anyway — this app does not own your calendar.`
           : null,
-        note: isCalendarConfigured()
+        note: canSyncCalendar()
           ? "Recorded and synced to your calendar."
           : "Recorded against the lead. No invite was sent and no calendar event was created — arrange the meeting itself in your own calendar.",
       },
@@ -449,7 +474,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
         after: {
           title: input.title,
           startsAt: input.startsAt.toISOString(),
-          calendarSynced: isCalendarConfigured(),
+          calendarSynced: canSyncCalendar(),
         },
         activity: {
           kind: "booking.created",
@@ -588,6 +613,38 @@ export async function recordBookingOutcome(
   });
 }
 
+const rescheduleSchema = z
+  .object({ startsAt: z.coerce.date(), endsAt: z.coerce.date(), timezone: z.string().trim().min(1).optional(), reason: z.string().trim().max(300).optional() })
+  .refine((v) => v.endsAt > v.startsAt, { message: "The meeting ends before it starts.", path: ["endsAt"] })
+  .refine((v) => v.endsAt.getTime() - v.startsAt.getTime() <= 8 * 3600_000, { message: "A meeting longer than eight hours is almost certainly a mistake.", path: ["endsAt"] });
+
+/** Moves a scheduled meeting. The old time is kept on the audit and activity rows. */
+export async function rescheduleBooking(ctx: AuthContext, id: string, raw: z.input<typeof rescheduleSchema>) {
+  const input = rescheduleSchema.parse(raw);
+  const booking = await loadScoped(
+    () => db.booking.findFirst({ where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...visibility(ctx) } }),
+    "That meeting"
+  );
+  if (booking.state !== "scheduled") {
+    throw new MutationError(`This meeting is ${booking.state}, so there is nothing to move. Book a new one instead.`, "not_scheduled", 409);
+  }
+  return mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
+    const updated = await db.booking.update({ where: { id }, data: { startsAt: input.startsAt, endsAt: input.endsAt, ...(input.timezone ? { timezone: input.timezone } : {}) } });
+    return {
+      result: {
+        booking: toPlain(updated),
+        note: canSyncCalendar() ? "Moved, and the calendar event was updated." : "Moved here. No calendar is connected, so nobody was told — let them know yourself.",
+      },
+      log: {
+        action: "booking.rescheduled", objectType: "Booking", objectId: id,
+        before: { startsAt: booking.startsAt.toISOString(), endsAt: booking.endsAt.toISOString() },
+        after: { startsAt: input.startsAt.toISOString(), endsAt: input.endsAt.toISOString(), reason: input.reason ?? null },
+        activity: { kind: "booking.rescheduled", summary: `Moved ${booking.title} to ${localDateKey(input.startsAt, input.timezone ?? booking.timezone)}${input.reason ? ` — ${input.reason}` : ""}`, leadId: booking.leadId ?? undefined },
+      },
+    };
+  });
+}
+
 export async function cancelBooking(ctx: AuthContext, id: string, reason: string) {
   if (reason.trim().length < 3) {
     throw new MutationError("Record why it was cancelled.", "reason_required", 422);
@@ -622,7 +679,7 @@ export async function cancelBooking(ctx: AuthContext, id: string, reason: string
     return {
       result: {
         booking: toPlain(updated),
-        note: isCalendarConfigured()
+        note: canSyncCalendar()
           ? "Cancelled, and the calendar event was removed."
           : "Cancelled here. No calendar is connected, so nobody was notified — tell them yourself.",
       },

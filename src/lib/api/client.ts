@@ -124,6 +124,37 @@ export const leadsApi = {
     api.post<{ id: string; body: string }>(`/api/leads/${id}/notes`, { body }),
 };
 
+export type Member = { id: string; name: string; avatarUrl: string | null; isYou: boolean };
+export const membersApi = {
+  list: () => api.get<{ members: Member[] }>("/api/members"),
+};
+
+export type BulkOutcome = { leadId: string; ok: boolean; code: string; message: string };
+export const bulkApi = {
+  quoteReveal: (ids: string[]) => api.get<{ leads: number; notFound: number; contacts: number; cost: number; balance: number }>(`/api/leads/bulk/reveal?ids=${ids.join(",")}`),
+  reveal: (leadIds: string[], idempotencyKey: string) => api.post<{ outcomes: BulkOutcome[]; pointsSpent: number; balance: number }>("/api/leads/bulk/reveal", { leadIds, idempotencyKey }),
+  assign: (leadIds: string[], ownerId: string | null) => api.post<{ outcomes: BulkOutcome[] }>("/api/leads/bulk/assign", { leadIds, ownerId }),
+};
+
+export const listsApi = {
+  list: () => api.get<{ id: string; name: string; isDynamic: boolean; count: number }[]>("/api/lists"),
+  create: (body: { name: string; description?: string; isDynamic?: boolean; filter?: Record<string, unknown> }) => api.post<{ list: { id: string; name: string }; note: string }>("/api/lists", body),
+  addLeads: (id: string, leadIds: string[]) => api.post<{ added: number; alreadyIn: number; notFound: number; note: string }>(`/api/lists/${id}/members`, { leadIds }),
+  removeLead: (id: string, leadId: string) => api.del<{ removed: number }>(`/api/lists/${id}/members`, { leadId }),
+  remove: (id: string) => api.del<{ note: string }>(`/api/lists/${id}`),
+};
+
+export const activityApi = {
+  logTouch: (leadId: string, body: { channel: string; direction?: "OUTBOUND" | "INBOUND"; outcome?: string; note?: string; occurredAt?: string }) =>
+    api.post<{ leadId: string; replied: boolean; sequencesStopped: number }>(`/api/leads/${leadId}/activity`, body),
+  decideRecommendation: (id: string, decision: "chosen" | "rejected", feedback?: string) =>
+    api.post<{ id: string }>(`/api/recommendations/${id}`, { decision, feedback }),
+};
+
+export const bookingsApi = {
+  create: (body: Record<string, unknown>) => api.post<{ id: string }>("/api/bookings", body),
+};
+
 export const tasksApi = {
   create: (body: Record<string, unknown>) => api.post<{ id: string }>("/api/tasks", body),
   update: (id: string, body: Record<string, unknown>) =>

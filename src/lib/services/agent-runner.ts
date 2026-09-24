@@ -15,6 +15,7 @@ import {
 import { getAutopilotConfig, decideOnAgentAction } from "@/lib/services/autopilot";
 import { decideOnMessage } from "@/lib/services/inbox-mutations";
 import { listApprovals, summariseApprovals } from "@/lib/services/trust";
+import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 /**
  * Running a tool as an agent.
@@ -322,6 +323,7 @@ export async function runToolAsAgent(
       },
     });
     await finishRun(run.id, { held: 1 });
+    await emitWebhookEvent(ctx.workspaceId, "agent.action_held", { actionId: record.id, runId: run.id, tool: opts.tool, riskClass: action.riskClass, summary });
 
     return {
       disposition: "approve",

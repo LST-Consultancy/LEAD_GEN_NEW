@@ -2,7 +2,6 @@ import "server-only";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
-import { hasIngestionSource } from "@/lib/ingest/sources";
 
 /**
  * §41 / §46 — searching the people and companies this workspace already holds.
@@ -151,10 +150,9 @@ export async function findPeople(ctx: AuthContext, raw: PeopleFilters = {}) {
     /**
      * Stated on every result set: this searched your workspace, nothing more.
      */
-    scope: hasIngestionSource()
-      ? "Your workspace, plus connected discovery sources."
-      : "Your workspace only. No discovery source is connected, so this cannot find people you do not already hold.",
-    externalSearchAvailable: hasIngestionSource(),
+    // Searching people outside the workspace is not built; enrichment runs per company from an opportunity.
+    scope: "People already in your workspace. To find new people at a company, open one of its opportunities and use Find people.",
+    externalSearchAvailable: false,
   };
 }
 
@@ -212,14 +210,17 @@ export async function getPeopleFacets(ctx: AuthContext) {
  */
 export async function listAccounts(
   ctx: AuthContext,
-  opts: { q?: string; limit?: number } = {}
+  opts: { q?: string; limit?: number; id?: string } = {}
 ) {
   const visible = leadVisibilityFilter(ctx);
+  // Deals follow the pipeline's rule: a rep sees only their own.
+  const dealScope = visible.ownerId ? { ownerId: visible.ownerId } : {};
 
   const companies = await db.company.findMany({
     where: {
       workspaceId: ctx.workspaceId,
       deletedAt: null,
+      ...(opts.id ? { id: opts.id } : {}),
       ...(opts.q ? { name: { contains: opts.q, mode: "insensitive" } } : {}),
     },
     orderBy: [{ intentScore: "desc" }, { lastSignalAt: "desc" }],
@@ -247,7 +248,7 @@ export async function listAccounts(
         },
       },
       deals: {
-        where: { deletedAt: null },
+        where: { workspaceId: ctx.workspaceId, deletedAt: null, ...dealScope },
         select: { id: true, title: true, valueInr: true, status: true, stage: { select: { name: true } } },
       },
       signals: {
@@ -329,6 +330,13 @@ export async function listAccounts(
       },
     };
   });
+}
+
+/** One account, or null when it is outside the workspace — the route turns that into a 404. */
+export async function getAccount(ctx: AuthContext, id: string) {
+  if (!z.string().uuid().safeParse(id).success) return null;
+  const [account] = await listAccounts(ctx, { id, limit: 1 });
+  return account ?? null;
 }
 
 /**

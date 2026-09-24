@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { toast } from "sonner";
+import { TaskDelegateButton, TaskSnoozeMenu, taskDoItHref, useTaskCompletion } from "@/components/tasks/task-actions";
+import { CreateTaskDialog } from "@/components/tasks/create-task-dialog";
 import {
   ArrowRight,
   Check,
@@ -12,7 +13,6 @@ import {
   MessageCircle,
   Phone,
   Sparkles,
-  UserPlus,
   X,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -90,6 +90,7 @@ export function QueueView({
   summary,
   focusOrder,
   initialTab,
+  initialFocus = false,
 }: {
   lanes: Record<string, Task[]>;
   counts: Record<string, number>;
@@ -101,33 +102,20 @@ export function QueueView({
   };
   focusOrder: string[];
   initialTab: string;
+  initialFocus?: boolean;
 }) {
   const [tab, setTab] = React.useState<string>(
     TABS.some((t) => t.key === initialTab) ? initialTab : "NEEDS_ATTENTION"
   );
-  const [completed, setCompleted] = React.useState<Set<string>>(new Set());
-  const [focus, setFocus] = React.useState(false);
+  const { completed, complete: completeTask } = useTaskCompletion();
+  const [focus, setFocus] = React.useState(initialFocus && focusOrder.length > 0);
 
   const allTasks = React.useMemo(() => Object.values(lanes).flat(), [lanes]);
   const focusQueue = focusOrder
     .map((id) => allTasks.find((t) => t.id === id))
     .filter((t): t is Task => Boolean(t) && !completed.has(t!.id));
 
-  function complete(task: Task) {
-    setCompleted((prev) => new Set(prev).add(task.id));
-    toast.success("Marked done", {
-      description: task.title,
-      action: {
-        label: "Undo",
-        onClick: () =>
-          setCompleted((prev) => {
-            const next = new Set(prev);
-            next.delete(task.id);
-            return next;
-          }),
-      },
-    });
-  }
+  const complete = (task: Task) => void completeTask(task);
 
   if (focus) {
     return (
@@ -199,10 +187,11 @@ export function QueueView({
           ))}
         </div>
 
+        <div className="ml-auto" />
+        <CreateTaskDialog />
         <Button
           variant="primary"
           size="sm"
-          className="ml-auto"
           disabled={focusQueue.length === 0}
           onClick={() => setFocus(true)}
         >
@@ -220,8 +209,9 @@ export function QueueView({
             description={
               tab === "DONE"
                 ? "Completed work appears here with the time it was closed."
-                : "Work lands here automatically when a lead replies, a deal stalls, or a follow-up comes due."
+                : "Add a task, take a recommendation on a lead, or wait for a reply or stalled deal to create one."
             }
+            action={tab !== "DONE" ? <CreateTaskDialog /> : undefined}
           />
         </Card>
       ) : (
@@ -369,15 +359,14 @@ function QueueRow({
           <div className="flex shrink-0 items-center gap-1">
             {task.status !== "DONE" ? (
               <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="hidden sm:inline-flex"
-                  onClick={() => toast("Action composer lands in Phase 4")}
-                >
-                  {Icon ? <Icon /> : null}
-                  Do it
-                </Button>
+                {taskDoItHref(task) ? (
+                  <Button variant="secondary" size="sm" className="hidden sm:inline-flex" asChild>
+                    <Link href={taskDoItHref(task)!}>
+                      {Icon ? <Icon /> : null}
+                      Do it
+                    </Link>
+                  </Button>
+                ) : null}
                 <Tooltip content="Mark complete">
                   <Button
                     variant="ghost"
@@ -582,10 +571,14 @@ function FocusMode({
         </CardContent>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-4 py-3">
-          <Button variant="primary" size="sm" onClick={() => toast("Action composer lands in Phase 4")}>
-            {Icon ? <Icon /> : null}
-            Do it
-          </Button>
+          {taskDoItHref(task) ? (
+            <Button variant="primary" size="sm" asChild>
+              <Link href={taskDoItHref(task)!}>
+                {Icon ? <Icon /> : null}
+                Do it
+              </Link>
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
             size="sm"
@@ -597,14 +590,8 @@ function FocusMode({
             <Check />
             Complete
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => toast("Snoozing lands with task mutations")}>
-            <Clock />
-            Snooze
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => toast("Delegation lands with TeamCollab")}>
-            <UserPlus />
-            Delegate
-          </Button>
+          <TaskSnoozeMenu taskId={task.id} onDone={() => setIndex((i) => Math.min(i, queue.length - 2))} />
+          <TaskDelegateButton taskId={task.id} currentOwnerId={task.owner?.id} onDone={() => setIndex((i) => Math.min(i, queue.length - 2))} />
           <Button
             variant="ghost"
             size="sm"

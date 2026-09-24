@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import type { AuthContext } from "@/lib/auth/context";
-import { leadVisibilityFilter } from "@/lib/auth/context";
+import { dealVisibilityFilter, leadVisibilityFilter } from "@/lib/auth/context";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate, softDelete, touchLead } from "@/lib/services/mutate";
@@ -12,7 +12,7 @@ async function scopedDeal(ctx: AuthContext, dealId: string) {
   return loadScoped(
     () =>
       db.deal.findFirst({
-        where: { id: dealId, workspaceId: ctx.workspaceId, deletedAt: null },
+        where: { id: dealId, workspaceId: ctx.workspaceId, deletedAt: null, ...dealVisibilityFilter(ctx) },
         include: {
           company: { select: { id: true, name: true } },
           stage: { select: { id: true, name: true, probability: true } },
@@ -217,6 +217,13 @@ export async function updateDeal(
 ) {
   const input = updateDealSchema.parse(raw);
   const deal = await scopedDeal(ctx, dealId);
+  if (input.ownerId && input.ownerId !== deal.ownerId) {
+    if (input.ownerId !== ctx.userId && !ctx.permissions.includes(PERMISSIONS.LEADS_VIEW_ALL)) {
+      throw new MutationError("Handing a deal to someone else needs permission to see the whole team's pipeline. Ask a manager.", "forbidden", 403);
+    }
+    const member = await db.workspaceMember.findFirst({ where: { workspaceId: ctx.workspaceId, userId: input.ownerId, deletedAt: null }, select: { id: true } });
+    if (!member) throw new MutationError("That person is not a member of this workspace.", "not_a_member", 422);
+  }
 
   return mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
     const before = {
@@ -226,6 +233,7 @@ export async function updateDeal(
       confidence: deal.confidence,
       repForecast: deal.repForecast,
       nextActionLabel: deal.nextActionLabel,
+      expectedCloseAt: deal.expectedCloseAt?.toISOString() ?? null,
     };
 
     const updated = await db.deal.update({
@@ -245,6 +253,13 @@ export async function updateDeal(
         data: { resolvedAt: new Date() },
       });
     }
+    // A close date moved into the future answers the "close date passed" flag.
+    if (input.expectedCloseAt && input.expectedCloseAt.getTime() > Date.now()) {
+      await db.dealRisk.updateMany({
+        where: { dealId, code: "close_date_passed", resolvedAt: null },
+        data: { resolvedAt: new Date() },
+      });
+    }
     if (deal.leadId) await touchLead(deal.leadId);
 
     const after = {
@@ -254,6 +269,7 @@ export async function updateDeal(
       confidence: updated.confidence,
       repForecast: updated.repForecast,
       nextActionLabel: updated.nextActionLabel,
+      expectedCloseAt: updated.expectedCloseAt?.toISOString() ?? null,
     };
 
     const valueChanged = before.valueInr !== after.valueInr;

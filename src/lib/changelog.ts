@@ -16,11 +16,23 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    title: "Opportunities become leads with their evidence",
+    area: "Discovery",
+    body: "Add to CRM now asks who the lead is for, carries the opportunity's sources onto the lead as signals, scores it against your primary ICP straight away, and credits its source in Insights. Company links open a real account page.",
+    caveat: "Without a primary ICP the lead is created but unscored, and says so. Deal readiness checks are not generated for new leads yet.",
+  },
+  {
+    title: "Honest provider status everywhere",
+    area: "Discovery",
+    body: "Screens that used to say no discovery source was connected now report your actual providers per job — discovery, finding people, verifying email — including whether each has passed its last test.",
+    caveat: "Search-phrase watching, standalone person lookup and external company research have no adapter yet, and those screens say so.",
+  },
+  {
     title: "Channel readiness for email, WhatsApp and LinkedIn",
     area: "Outreach",
     body: "Each channel now reports how many of your leads it could actually reach, counted from contact records rather than estimated, alongside exactly what connecting it would require.",
     caveat:
-      "No delivery adapter is implemented, so nothing sends on any channel. Sequences still step, hold and record with their reasons.",
+      "Email sends through SMTP or Resend once a mailbox is connected. WhatsApp and LinkedIn have no sending adapter, so those steps hold with their reasons.",
   },
   {
     title: "LinkedIn as an assisted workflow",

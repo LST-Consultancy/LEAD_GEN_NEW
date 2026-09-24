@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { formatAge, formatInrCompact, formatNumber } from "@/lib/format";
 import { TIER } from "@/lib/vocab";
 
-type Account = {
+export type Account = {
   opportunities: { id: string; title: string; intentScore: number; status: string }[];
   id: string;
   name: string;
@@ -79,27 +79,6 @@ type PlanState =
 export function AccountsView({ accounts }: { accounts: Account[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [plan, setPlan] = useState<PlanState | null>(null);
-
-  async function generatePlan(accountId: string) {
-    setPlan({ accountId, status: "loading" });
-    try {
-      const res = await fetch(`/api/accounts/${accountId}/plan`, { method: "POST" });
-      const body = await res.json();
-      if (!res.ok) {
-        setPlan({
-          accountId,
-          status: "error",
-          reason: body.error?.message ?? "Couldn't generate a plan.",
-        });
-        return;
-      }
-      setPlan({ accountId, status: "done", sections: body.sections });
-    } catch {
-      setPlan({ accountId, status: "error", reason: "Couldn't reach the server." });
-    }
-  }
-
   const filtered = q
     ? accounts.filter((a) => a.name.toLowerCase().includes(q.toLowerCase()))
     : accounts;
@@ -176,7 +155,6 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                   type="button"
                   onClick={() => {
                     setExpanded(expanded === a.id ? null : a.id);
-                    setPlan(null);
                   }}
                   className="flex min-w-0 items-start gap-2 text-left"
                   aria-expanded={expanded === a.id}
@@ -219,6 +197,9 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                   </div>
                 </button>
                 <div className="flex shrink-0 items-center gap-3 text-right">
+                  <Link href={`/accounts/${a.id}`} className="text-2xs font-medium text-brand-text hover:underline">
+                    Open
+                  </Link>
                   {a.intentScore > 0 ? (
                     <div>
                       <p className="text-2xs text-muted">Intent</p>
@@ -237,7 +218,39 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
               </CardHeader>
 
               {expanded === a.id ? (
-                <CardContent className="flex flex-col gap-3 pt-0">
+                <CardContent className="pt-0">
+                  <AccountDetail account={a} />
+                </CardContent>
+              ) : null}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Everything known about one account. Shared by the list's expanded row and /accounts/[id]. */
+export function AccountDetail({ account: a }: { account: Account }) {
+  const [plan, setPlan] = useState<PlanState | null>(null);
+
+  async function generatePlan() {
+    setPlan({ accountId: a.id, status: "loading" });
+    try {
+      const res = await fetch(`/api/accounts/${a.id}/plan`, { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) {
+        setPlan({ accountId: a.id, status: "error", reason: body.error?.message ?? "Couldn't generate a plan." });
+        return;
+      }
+      setPlan({ accountId: a.id, status: "done", sections: body.sections });
+    } catch {
+      setPlan({ accountId: a.id, status: "error", reason: "Couldn't reach the server." });
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
                   <div>
                     <p className="mb-1 text-2xs font-semibold uppercase tracking-wider text-muted">
                       <Users className="mr-0.5 inline size-2.5" />
@@ -344,11 +357,11 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                   ) : null}
 
                   <div className="border-t border-border-subtle pt-2.5">
-                    {plan?.accountId !== a.id ? (
+                    {!plan ? (
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => generatePlan(a.id)}
+                        onClick={() => generatePlan()}
                         disabled={a.committee.length === 0 && a.openDeals.length === 0}
                       >
                         <Sparkles />
@@ -362,7 +375,7 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                     ) : plan.status === "error" ? (
                       <div className="flex flex-col items-start gap-1.5">
                         <p className="text-2xs text-danger-text">{plan.reason}</p>
-                        <Button variant="secondary" size="sm" onClick={() => generatePlan(a.id)}>
+                        <Button variant="secondary" size="sm" onClick={() => generatePlan()}>
                           <Sparkles />
                           Try again
                         </Button>
@@ -379,18 +392,12 @@ export function AccountsView({ accounts }: { accounts: Account[] }) {
                             <p className="mt-0.5 text-xs leading-relaxed text-secondary">{s.body}</p>
                           </div>
                         ))}
-                        <Button variant="ghost" size="sm" onClick={() => generatePlan(a.id)}>
+                        <Button variant="ghost" size="sm" onClick={() => generatePlan()}>
                           Regenerate
                         </Button>
                       </div>
                     )}
                   </div>
-                </CardContent>
-              ) : null}
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
