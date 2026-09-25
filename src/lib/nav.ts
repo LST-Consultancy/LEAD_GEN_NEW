@@ -201,9 +201,8 @@ export const NAV: NavGroup[] = [
         phase: "Phase 4",
         purpose: "India-first messaging via the official WhatsApp Business API.",
         planned: [
-          "The send adapter itself — reach, consent rules and suppression are real",
-          "Template management and approval status, once a WABA is connected",
-          "Delivery and read receipts, which arrive over the webhook",
+          "Template catalogue sync and approval status — templates are sent by name today",
+          "Personal WhatsApp pairing — only the official Business Cloud API is supported",
         ],
         keywords: ["wa", "chat", "messaging"],
       },
@@ -245,7 +244,6 @@ export const NAV: NavGroup[] = [
         phase: "Phase 7",
         purpose: "Meetings recorded against the lead, with the pre-call brief that makes the call land and the outcome that moves the deal.",
         planned: [
-          "Calendar sync and invites — nothing here creates an event yet",
           "A public booking page with real availability",
           "Call recording, transcription and automatic outcome capture",
         ],
@@ -266,7 +264,6 @@ export const NAV: NavGroup[] = [
         phase: "Phase 5",
         purpose: "Paste a name, LinkedIn URL or company and get a full dossier on demand.",
         planned: [
-          "On-demand enrichment for someone you do not already hold",
           "Pasting a job advert or a news article and extracting the company",
         ],
         keywords: ["lookup", "enrich", "research one"],
@@ -603,8 +600,7 @@ export const NAV: NavGroup[] = [
         phase: "Phase 1",
         purpose: "Per-type, per-channel notification control.",
         planned: [
-          "Per-kind muting — there is nowhere to store the preference yet",
-          "Email and push delivery; these arrive in the app only",
+          "Push and WhatsApp delivery — notifications arrive in the app and by email only",
         ],
         keywords: ["alerts", "email prefs", "push"],
       },
@@ -617,7 +613,6 @@ export const NAV: NavGroup[] = [
         phase: "Phase 4",
         purpose: "Sending identities, reply readback and domain authentication.",
         planned: [
-          "OAuth mailbox connection and the delivery adapter — nothing sends yet",
           "Automated SPF, DKIM and DMARC checking against your live DNS",
           "Per-mailbox daily throttles",
         ],
@@ -662,8 +657,7 @@ export const NAV: NavGroup[] = [
         phase: "Phase 7",
         purpose: "Calendar connections and your scheduling link.",
         planned: [
-          "The calendar adapter itself — booking and outcome capture are real",
-          "Free/busy lookup, without which any availability shown would be a guess",
+          "CalDAV calendars (iCloud, Fastmail, self-hosted) — Google and Microsoft 365 are supported",
         ],
         keywords: ["google calendar", "outlook", "cal.com", "calendly"],
       },
@@ -700,7 +694,6 @@ export const NAV: NavGroup[] = [
         phase: "Phase 9",
         purpose: "Operate this workspace from Claude, Claude Code, Cursor and other MCP clients.",
         planned: [
-          "The MCP transport itself — the tools, scopes and auth are built",
           "OAuth device flow, so a client can connect without pasting a key",
         ],
         keywords: ["model context protocol", "claude", "cursor", "tools"],

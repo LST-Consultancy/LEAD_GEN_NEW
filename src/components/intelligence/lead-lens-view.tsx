@@ -46,8 +46,9 @@ const KIND_LABEL: Record<string, string> = {
   url: "a LinkedIn URL",
 };
 
-export function LeadLensView({ readiness }: { readiness: Awaited<ReturnType<typeof leadLensReadiness>> }) {
-  const [q, setQ] = useState("");
+export function LeadLensView({ readiness, initialQuery = "" }: { readiness: Awaited<ReturnType<typeof leadLensReadiness>>; initialQuery?: string }) {
+  // Prefilled from a link (a lead's company); nothing runs until the person searches.
+  const [q, setQ] = useState(initialQuery);
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
 

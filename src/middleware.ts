@@ -32,7 +32,7 @@ export function middleware(req: NextRequest) {
     hasApiKey:
       req.headers.has("x-api-key") || Boolean(req.headers.get("authorization")?.startsWith("Bearer ")),
     allowedHosts: configuredHosts(process.env.APP_ALLOWED_HOSTS),
-    signedWebhook: req.nextUrl.pathname.startsWith("/api/webhooks/inbound/") && req.headers.has("x-hub-signature-256"),
+    signedWebhook: req.nextUrl.pathname.startsWith("/api/webhooks/inbound/") && (req.headers.has("x-hub-signature-256") || req.headers.has("x-razorpay-signature")),
   });
 
   if (verdict.ok) {

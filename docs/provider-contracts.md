@@ -4,16 +4,64 @@ These were checked against the vendors' own documentation and the public Apify A
 2026-09-25. No provider calls were made with credentials and no credits were spent. Anything
 marked **unconfirmed** was not verified, and the code does not depend on it.
 
-## Contact providers (the fallback after Apify)
+## Stage-level fallback providers
 
-| Provider | Call used | Auth | Cost | Notes |
-| --- | --- | --- | --- | --- |
-| SignalHire | `POST https://www.signalhire.com/api/v1/candidate/search` with `{ items: [linkedinUrl], withoutWaterfall: true }` | `apikey` header | 1 credit per successful match | The full lookup delivers results **only** to a public `callbackUrl`, and they cannot be polled. A self-hosted instance cannot receive that, so the app uses synchronous mode, which reads SignalHire's stored data and finds fewer contacts. Item `status`: `success`, `failed`, `credits_are_over`, `timeout_exceeded`, `duplicate_query`. Each contact is `{type, value, rating, subType}`; `subType` for an email is `work`, `personal` or null. Personal emails are not used. Health check: `GET /credits` returns `{credits}`. |
-| Hunter | `GET https://api.hunter.io/v2/email-finder?domain&first_name&last_name` | `api_key` query | 1 credit, only when an address is found | Returns `data.email`, `score`, `accept_all` and `verification.status`. A 451 response means the person asked Hunter not to process their data, and the app records it as a note, not an error. Health check: `GET /account` is free. |
-| Apollo | `POST https://api.apollo.io/api/v1/people/match` | `x-api-key` header | 1 credit when data is found | People API Search returns no emails, so it is not used. `reveal_personal_emails` and `reveal_phone_number` are always false; phone numbers need a webhook and cost 8 extra credits. `match_confidence` is `high`, `medium`, `low` or `none`. `email_status` only documents `verified`; the other values are unconfirmed. Health check: `GET /auth/health` returns `{healthy, is_logged_in}`. |
+Each Apify enrichment stage runs first. When it finds nothing, fails, or leaves fields empty, the
+same stage may use the providers below. The executable version of this table is
+`lib/enrichment/capabilities.ts`; the orchestrator (`lib/services/fallback-orchestrator.ts`) calls
+only an operation marked supported there, and only when it has that call's inputs.
 
-No provider's own confidence score or status counts as a verification here. A check result
-comes only from the verify stage (`lib/enrichment/verification.ts`).
+| Operation | SignalHire | Hunter | Apollo |
+| --- | --- | --- | --- |
+| Company identity (name → domain) | **Not supported.** The Company API looks up only by SignalHire id or LinkedIn slug. | `GET /v2/domain-finder?company=`. Free, but blocked once the monthly search quota is used. Returns `data[]{domain, company_name}`. | `POST /api/v1/mixed_companies/search` with `q_organization_name`. 1 credit per page, paid plans only. |
+| Company details (by domain) | Not supported | `GET /v2/companies/find?domain=`. 1 credit, charged only when the full record comes back. Returns `name, category.industry, geo{city,state,country}, linkedin.handle, metrics{employees, employeesCount}`. | `GET /api/v1/organizations/enrich?domain=`. 1 credit. |
+| People at the company | `POST /api/v1/candidate/searchByQuery` with `currentCompany` and `currentTitle`. No credits; uses the daily search quota. Profiles have `uid, fullName, location, experience[{company,title}]`, no LinkedIn URL, no `current` flag. The first role listed is the latest. | `GET /v2/domain-search?domain=&type=personal`. 1 credit per 1–10 addresses returned. `emails[]{value, first_name, last_name, position, linkedin, verification.status}`. | `POST /api/v1/mixed_people/api_search`. 0 credits; the key needs this endpoint in scope, otherwise 403 `API_INACCESSIBLE`. Last names are obfuscated, so each kept result is revealed with `POST /people/match?id=` for 1 credit. |
+| Business email for a person | `POST /api/v1/candidate/search` with `{items:[linkedinUrl], withoutWaterfall:true}`. 1 credit per match. Synchronous mode only, because full mode needs a public callback. | `GET /v2/email-finder?domain&first_name&last_name`. 1 credit only when found. 451 means the person opted out. | `POST /api/v1/people/match`. 1 credit when data is found. `match_confidence` is `high`, `medium`, `low` or `none`. |
+| Email verification | **Not supported.** `rating` is not a mailbox check. | `GET /v2/email-verifier?email=`. `status`: `valid`, `invalid`, `accept_all`, `webmail`, `disposable`, `unknown`. 202 means still checking. | **Not supported.** `email_status` is Apollo's label, not a check. |
+
+Error codes, as the docs state them, and as `classifyProviderError` maps them:
+
+- **Hunter**
+  - 401 → key refused.
+  - 403 → rate limited. The exception is a `no_…` code such as `no_discover_access`, which means the plan does not include the call.
+  - 429 → monthly usage exceeded (quota).
+  - 451 → opted out, treated as no match.
+- **Apollo**
+  - 401 → key refused.
+  - 403 → not entitled: master-key or scope required, or a paid plan only.
+  - 422 → missing input.
+  - 429 → rate limited.
+- **SignalHire**
+  - 401 → key refused.
+  - 402 → credits or search quota used up.
+  - 403 → account disabled or API not enabled.
+  - 406 → validation.
+  - 429 → rate limited.
+- **Any provider**
+  - 5xx or network → transient.
+  - A body that fails the adapter's zod schema → `malformed`. That usually means the API changed, and the stage says the adapter needs checking.
+
+**Identity, ownership and verification are separate.**
+
+- **Identity.** A returned person's address is attached only when `checkIdentity` (`lib/enrichment/identity-gate.ts`) rates the match `confirmed` or `supported`:
+  - `confirmed`: the same LinkedIn profile.
+  - `supported`: the same name, and the provider places them at this company.
+  - A different profile, name or employer is a `conflict`. A low-confidence match with nothing else is `weak`.
+  - Both `conflict` and `weak` are kept on the company as a possible match for review, and the next provider is still tried.
+- **Ownership** is recorded as how the address came to be theirs.
+- **Verification** only ever comes from a mailbox check: the Apify verifier, or Hunter's.
+
+**Limits.**
+
+- Every provider call is written to the `ProviderCall` ledger *before* it is made, under a row lock on the workspace.
+- Paid calls are capped per run and per day across runs. Free searches have their own per-run cap.
+- A call already answered for the same target inside the freshness window is not repeated unless the user chooses "Run again".
+- If a call started but its answer was lost (a worker died mid-call), it is reported as interrupted and not repeated.
+- These caps count calls. They are not a money ceiling, because each provider's plan sets the price.
+
+No live call has been made against any of these endpoints with a real key in this environment.
+The shapes above come from the vendors' documentation. They are exercised by replays of the documented example responses (not captured live traffic) in
+`tests/provider-replays.test.ts`.
 
 ## Apify discovery Actors
 

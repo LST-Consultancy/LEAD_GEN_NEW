@@ -15,9 +15,9 @@ import type { ChannelReach } from "@/lib/services/channels";
  * Settings → Email Accounts.
  *
  * The provider abstraction is real and reads the environment, so this screen
- * reports actual state rather than a mock-up. What it must not do is offer a
- * "Connect" button: no OAuth flow exists, and a button that opens nothing is
- * the exact failure §126 forbids.
+ * reports actual state rather than a mock-up. The provider list below is the
+ * server-wide relay; a workspace's own mailboxes (SMTP, Gmail or Microsoft 365
+ * over OAuth) are connected in the panel rendered as `children`.
  */
 export function EmailAccountsView({
   providers,
@@ -26,6 +26,7 @@ export function EmailAccountsView({
   canReceive,
   reach,
   domainChecks,
+  workspaceSender = null,
   children,
 }: {
   providers: (ProviderDescriptor & { adapterBuilt: boolean })[];
@@ -35,7 +36,9 @@ export function EmailAccountsView({
   canReceive: boolean;
   reach: ChannelReach;
   domainChecks: { record: string; purpose: string; failureMode: string }[];
-  /** Rendered under the sending status: the reply-reading mailboxes. */
+  /** The workspace mailbox new messages send from, when one is set up. */
+  workspaceSender?: string | null;
+  /** Rendered under the sending status: the workspace's mailboxes. */
   children?: React.ReactNode;
 }) {
   return (
@@ -49,7 +52,13 @@ export function EmailAccountsView({
         </p>
       </div>
 
-      {active && canSend ? (
+      {workspaceSender ? (
+        <div className={`rounded-lg border px-3 py-2.5 text-xs ${canReceive ? "border-success-border bg-success-subtle text-success-text" : "border-warning-border bg-warning-subtle text-warning-text"}`}>
+          {canReceive ? <Check className="mr-1 inline size-3.5" /> : <AlertTriangle className="mr-1 inline size-3.5" />}
+          New messages send from <strong>{workspaceSender}</strong>, this workspace&apos;s default mailbox
+          {canReceive ? ", and a connected mailbox reads replies, so stop-on-reply is honoured automatically." : ". No mailbox is read for replies, so stop-on-reply sequences stay blocked until one is."}
+        </div>
+      ) : active && canSend ? (
         canReceive ? (
           <div className="rounded-lg border border-success-border bg-success-subtle px-3 py-2.5 text-xs text-success-text">
             <Check className="mr-1 inline size-3.5" />
@@ -128,13 +137,14 @@ export function EmailAccountsView({
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
             <Mail className="size-3.5 text-muted" />
-            Providers
+            Server relay
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2 pt-0">
           <p className="text-2xs leading-relaxed text-muted">
-            Two different things have to be true to send: a credential, and an adapter that knows
-            how to use it. Both are shown, because a credential for a provider with no adapter
+            The server-wide fallback, used only when this workspace has no sending mailbox above. It is
+            set in the server&apos;s environment, not here. Two different things have to be true for it
+            to send: a credential, and an adapter that knows how to use it. Both are shown, because a credential for a provider with no adapter
             sends nothing — and sends it silently.
           </p>
           {providers.map((p) => (

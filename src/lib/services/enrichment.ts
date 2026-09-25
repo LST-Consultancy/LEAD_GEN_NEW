@@ -101,7 +101,7 @@ export async function getOpportunityEnrichment(ctx: AuthContext, opportunityId: 
   return toPlain({
     company: { id: company.id, name: company.name, domain: company.domain, website: company.website, linkedinUrl: company.linkedinUrl, description: company.description, industry: company.industry, city: company.city, state: company.state, country: company.country, employeeCount: company.employeeCount, employeeBand: company.employeeBand, enrichment: company.enrichment },
     people: people.map(e => ({ employmentId: e.id, personId: e.personId, name: e.person.fullName, title: e.title, linkedinUrl: e.person.linkedinUrl, city: e.person.city, country: e.person.country, association: e.association, isDecisionMaker: e.isDecisionMaker, evidence: e.evidence, source: e.source, contacts: e.person.contactMethods.map(m => ({ id: m.id, kind: m.kind, value: m.value, verificationResult: m.verificationResult, verifiedAt: m.verifiedAt, source: m.source, provenance: m.provenance })) })),
-    contactPoints: contactPoints.filter(p => !suppressed.has(p.value.toLowerCase())).map(p => ({ id: p.id, kind: p.kind, value: p.value, isGeneric: p.isGeneric, domainStatus: p.domainStatus, possiblePersonId: p.possiblePersonId, source: p.source, evidence: p.evidence, verificationResult: p.verificationResult, verifiedAt: p.verifiedAt })),
+    contactPoints: contactPoints.filter(p => !suppressed.has(p.value.toLowerCase()) && ((p.evidence ?? {}) as { review?: { decision?: string } }).review?.decision !== "attached").map(p => ({ id: p.id, kind: p.kind, value: p.value, isGeneric: p.isGeneric, domainStatus: p.domainStatus, possiblePersonId: p.possiblePersonId, source: p.source, evidence: p.evidence, verificationResult: p.verificationResult, verifiedAt: p.verifiedAt })),
     runs,
     setup: "missing" in conn ? { ready: false, message: conn.missing } : { ready: true, message: null },
     estimates: Object.fromEntries(RUN_KINDS.map(k => [k, estimateRun(k, cfg)])),
@@ -115,13 +115,13 @@ export async function getOpportunityEnrichment(ctx: AuthContext, opportunityId: 
  */
 export async function selectEnrichmentCompany(ctx: AuthContext, runId: string, raw: unknown) {
   z.string().uuid().parse(runId);
-  const { index, none } = z.object({ index: z.number().int().min(0).max(9).optional(), none: z.boolean().optional() }).parse(raw ?? {});
+  const { index, fallbackIndex, none } = z.object({ index: z.number().int().min(0).max(9).optional(), fallbackIndex: z.number().int().min(0).max(9).optional(), none: z.boolean().optional() }).parse(raw ?? {});
   const run = await loadScoped(() => db.enrichmentRun.findFirst({ where: { id: runId, workspaceId: ctx.workspaceId } }), "That enrichment run");
   await getOpportunity(ctx, run.opportunityId);
   if (!isQueueConfigured()) throw new MutationError("Continuing needs Redis and the worker. Nothing was changed.", "queue_unavailable", 503);
   return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
     if (run.state !== "NEEDS_SELECTION") throw new MutationError("This run is not waiting for a company choice any more. Refresh to see its current state.", "conflict", 409);
-    const result = (run.result ?? {}) as { candidates?: { profile: CompanyProfile; score: number }[] };
+    const result = (run.result ?? {}) as { candidates?: { profile: CompanyProfile; score: number }[]; fallbackCandidates?: { name: string; domain: string | null; linkedinUrl: string | null; source: string }[] };
     const stages = (run.stages as unknown as Stage[]).map(s => ({ ...s }));
     const resolve = stages.find(s => s.key === "resolve")!;
     if (none) {
@@ -129,6 +129,17 @@ export async function selectEnrichmentCompany(ctx: AuthContext, runId: string, r
       stages.forEach(s => { if (s.status === "blocked") Object.assign(s, { status: "blocked", reason: "Not run: the company was not identified." }); });
       await db.enrichmentRun.update({ where: { id: run.id }, data: { stages: stages as unknown as Prisma.InputJsonValue, state: "NO_MATCHES", finishedAt: new Date() } });
       return { result: { state: "NO_MATCHES" }, log: { action: "opportunity.company_rejected", objectType: "EnrichmentRun", objectId: run.id } };
+    }
+    // A name match from Hunter or Apollo (no LinkedIn profile): the person's choice is the evidence.
+    const fb = fallbackIndex !== undefined ? result.fallbackCandidates?.[fallbackIndex] : undefined;
+    if (fallbackIndex !== undefined) {
+      if (!fb?.domain) throw new MutationError("Choose one of the listed companies.", "invalid_choice", 422);
+      const saved = await applyCompanyFields(ctx.workspaceId, run.companyId, { domain: fb.domain, website: `https://${fb.domain}`, ...(fb.linkedinUrl ? { linkedinUrl: fb.linkedinUrl } : {}) }, { source: "user_selection", runId: run.id, confidence: 100, confirmedBy: ctx.userId });
+      Object.assign(resolve, { status: "done", reason: `You chose ${fb.name} (${fb.domain}), found by ${fb.source.split(":")[0]}.`, counts: { identityFieldsUpdated: saved.updated.length } });
+      stages.forEach(s => { if (s.status === "blocked") Object.assign(s, { status: "pending", reason: undefined }); });
+      await db.enrichmentRun.update({ where: { id: run.id }, data: { stages: stages as unknown as Prisma.InputJsonValue, state: "QUEUED", finishedAt: null } });
+      await queueRun(ctx.workspaceId, run.id);
+      return { result: { state: "QUEUED" }, log: { action: "opportunity.company_selected", objectType: "EnrichmentRun", objectId: run.id, after: { domain: fb.domain, source: fb.source } } };
     }
     const chosen = index !== undefined ? result.candidates?.[index] : undefined;
     if (!chosen) throw new MutationError("Choose one of the listed companies.", "invalid_choice", 422);
@@ -223,6 +234,41 @@ export async function decideEmailDomain(ctx: AuthContext, opportunityId: string,
     return {
       result: { domain: input.domain, status, addresses: count },
       log: { action: "company.email_domain_decided", objectType: "Company", objectId: company.id, before: { domain: input.domain, status: prior.status }, after: { domain: input.domain, status } },
+    };
+  });
+}
+
+const pointDecisionSchema = z.object({ pointId: z.string().uuid(), decision: z.enum(["attach", "dismiss"]) });
+/**
+ * A person settles an address a provider returned for someone whose identity was not confirmed:
+ * "attach" gives it to the possible owner, recorded as confirmed by that person; "dismiss" keeps it
+ * on the company with no owner. Either way the evidence stays, and the decision is final.
+ */
+export async function decideContactPoint(ctx: AuthContext, opportunityId: string, raw: unknown) {
+  const input = pointDecisionSchema.parse(raw ?? {});
+  const opportunity = await getOpportunity(ctx, opportunityId);
+  const point = await loadScoped(() => db.companyContactPoint.findFirst({ where: { id: input.pointId, workspaceId: ctx.workspaceId, companyId: opportunity.companyId, kind: "EMAIL" } }), "That address");
+  const evidence = (point.evidence ?? {}) as Record<string, unknown> & { review?: Record<string, unknown> };
+  if (!evidence.review) throw new MutationError("That address is not waiting for a decision.", "not_reviewable", 409);
+  if (evidence.review.decision) throw new MutationError("Someone has already decided about this address. Refresh to see it.", "conflict", 409);
+  const personId = point.possiblePersonId;
+  if (input.decision === "attach") {
+    if (!personId || point.isGeneric) throw new MutationError("This address does not name a person, so it stays on the company.", "not_attachable", 422);
+    if (!["matched", "alias"].includes(point.domainStatus)) throw new MutationError("This address is not on the company's email domain. Decide the domain first.", "domain_undecided", 422);
+    const blocked = await db.suppression.count({ where: { workspaceId: ctx.workspaceId, value: { equals: point.value, mode: "insensitive" } } });
+    if (blocked) throw new MutationError("This address is on the do-not-contact list, so it cannot be given to a person.", "suppressed", 422);
+    await loadScoped(() => db.employment.findFirst({ where: { workspaceId: ctx.workspaceId, companyId: opportunity.companyId, personId } }), "That person");
+  }
+  return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
+    const at = new Date().toISOString();
+    if (input.decision === "attach") {
+      const exists = await db.contactMethod.findFirst({ where: { workspaceId: ctx.workspaceId, personId: personId!, value: { equals: point.value, mode: "insensitive" } } });
+      if (!exists) await db.contactMethod.create({ data: { workspaceId: ctx.workspaceId, personId: personId!, kind: "WORK_EMAIL", value: point.value, maskedValue: point.value.replace(/^(.).+@/, "$1***@"), isLocked: false, status: "UNVERIFIED", confidence: 70, source: point.source, verificationResult: point.verificationResult, verifiedAt: point.verifiedAt, provenance: { discovery: { kind: "provider", source: point.source, retrievedAt: evidence.retrievedAt ?? null }, ownership: { basis: "confirmed_by_person", userId: ctx.userId, at }, identity: { level: "confirmed_by_person", provider: evidence.review?.identity ?? null } } as Prisma.InputJsonValue } });
+    }
+    await db.companyContactPoint.update({ where: { id: point.id }, data: { ...(input.decision === "dismiss" ? { possiblePersonId: null } : {}), evidence: { ...evidence, review: { ...evidence.review, decision: input.decision === "attach" ? "attached" : "dismissed", decidedBy: ctx.userId, decidedAt: at } } as Prisma.InputJsonValue } });
+    return {
+      result: { decision: input.decision },
+      log: { action: "company.contact_point_decided", objectType: "CompanyContactPoint", objectId: point.id, before: { possiblePersonId: personId }, after: { decision: input.decision, personId: input.decision === "attach" ? personId : null } },
     };
   });
 }

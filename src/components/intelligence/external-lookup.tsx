@@ -16,9 +16,11 @@ export function ExternalLookup({ query, readiness }: { query: string; readiness:
   const [result, setResult] = useState<Lookup | null>(null); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   const t = classifyTarget(query);
   if (t.kind === "unsupported") return <p className="text-2xs text-secondary">{t.reason}</p>;
-  const person = t.kind === "person_linkedin";
+  const byName = t.kind === "person_name";
+  const person = t.kind === "person_linkedin" || byName;
   const ready = person ? readiness.personProviders.length > 0 && readiness.canReveal : readiness.companyReady && readiness.canEdit;
-  const cost = person ? `Uses ${readiness.personProviders.join(" then ") || "SignalHire or Apollo"}: one provider credit per successful match.` : `Uses your Apify account: ${t.kind === "domain" ? "a Google search plus up to three LinkedIn company pages" : "one LinkedIn company page"}, a few cents at listed prices.`;
+  const cost = byName ? `Searches ${readiness.personProviders.join(" and ") || "SignalHire or Apollo"} for people named “${t.name}”${t.company ? ` at ${t.company}` : ""} — the search itself uses no credits. You then choose the right person, and only revealing them uses one credit. Treated as a person's name; paste a domain or LinkedIn page to look up a company.`
+    : person ? `Uses ${readiness.personProviders.join(" then ") || "SignalHire or Apollo"}: one provider credit per successful match.` : `Uses your Apify account: ${t.kind === "domain" ? "a Google search plus up to three LinkedIn company pages" : "one LinkedIn company page"}, a few cents at listed prices.`;
   async function go(refresh = false) {
     setBusy(true); setMessage("");
     try { setResult(await api.post<Lookup>("/api/lookup/external", { target: query, refresh })); } catch (e) { setMessage(e instanceof Error ? e.message : "The lookup failed."); } finally { setBusy(false); }
@@ -27,12 +29,12 @@ export function ExternalLookup({ query, readiness }: { query: string; readiness:
     if (!result) return; setBusy(true);
     try { setResult(await api.post<Lookup>(`/api/lookup/external/${result.id}/confirm`, { index })); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not save that."); } finally { setBusy(false); }
   }
-  const candidates = (result?.candidates ?? []) as { fullName?: string; name?: string; title?: string | null; headline?: string | null; domain?: string | null; linkedinUrl?: string | null; employer?: { name: string } | null; city?: string | null }[];
+  const candidates = (result?.candidates ?? []) as { fullName?: string; name?: string; title?: string | null; headline?: string | null; domain?: string | null; linkedinUrl?: string | null; employer?: { name: string } | null; city?: string | null; provider?: string; company?: string | null; location?: string | null; nameIsPartial?: boolean }[];
   return <div className="space-y-2 rounded-lg border border-border p-3 text-xs">
     <p className="font-medium text-primary">Look up outside this workspace</p>
     <p className="text-secondary">{cost} A found answer is kept for 30 days and shown again without charging. Nothing is sent to the person.</p>
     {!ready && <p className="text-warning-text">{person ? (readiness.canReveal ? readiness.personWhy : "Your role cannot reveal contact details.") : readiness.canEdit ? "Save an Apify token on Apify enrichment or LinkedIn posts first." : "Your role cannot add companies."} <Link href="/settings/providers" className="underline">Lead Sources & APIs</Link></p>}
-    <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={!ready || busy} loading={busy} onClick={() => void go()}>Look up {person ? "this profile" : "this company"}</Button>
+    <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={!ready || busy} loading={busy} onClick={() => void go()}>{byName ? "Search people by this name" : `Look up ${person ? "this profile" : "this company"}`}</Button>
       {result?.cached && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void go(true)}>Look up again (charges again)</Button>}</div>
     {message && <p role="alert" className="text-danger-text">{message}</p>}
     {result && <div className="space-y-1 rounded border border-border p-2">
@@ -40,7 +42,7 @@ export function ExternalLookup({ query, readiness }: { query: string; readiness:
       {result.note && <p className="text-secondary">{result.note}</p>}
       {result.person && <p><Link href={`/people-finder?q=${encodeURIComponent(result.person.fullName)}`} className="font-medium underline">{result.person.fullName}</Link>{result.person.employments[0] ? ` · ${result.person.employments[0].title || "title unknown"} at ${result.person.employments[0].company.name}` : ""}</p>}
       {result.company && <p><Link href={`/accounts/${result.company.id}`} className="font-medium underline">{result.company.name}</Link>{[result.company.domain, result.company.industry, result.company.city, result.company.employeeCount ? `${result.company.employeeCount} employees` : null].filter(Boolean).map(x => ` · ${x}`).join("")}</p>}
-      {result.status === "NEEDS_CONFIRMATION" && <ul className="space-y-1">{candidates.map((c, i) => <li key={i} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-words">{c.fullName ?? c.name}{c.title ? ` · ${c.title}` : ""}{c.employer ? ` at ${c.employer.name}` : ""}{c.domain ? ` · ${c.domain}` : ""}{c.city ? ` · ${c.city}` : ""}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => void confirm(i)}>This one</Button></li>)}</ul>}
+      {result.status === "NEEDS_CONFIRMATION" && <ul className="space-y-1">{candidates.map((c, i) => <li key={i} className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-words">{c.fullName ?? c.name}{c.title ? ` · ${c.title}` : ""}{c.employer ? ` at ${c.employer.name}` : c.company ? ` at ${c.company}` : ""}{c.domain ? ` · ${c.domain}` : ""}{c.city ?? c.location ? ` · ${c.city ?? c.location}` : ""}{c.provider ? <span className="text-secondary"> · via {c.provider === "signalhire" ? "SignalHire" : "Apollo"}{c.nameIsPartial ? " (last name hidden until revealed)" : ""}</span> : null}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => void confirm(i)}>{c.provider ? "Reveal this one (1 credit)" : "This one"}</Button></li>)}</ul>}
     </div>}
   </div>;
 }

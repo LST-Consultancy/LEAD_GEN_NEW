@@ -4,6 +4,7 @@ import { discoverOpportunities } from "@/lib/services/opportunity-ingestion";
 import { refreshOpportunityWatches } from "@/lib/services/opportunity-watches";
 import { syncWorkspaceMailboxes } from "@/lib/services/mailboxes";
 import { deliverNotificationEmails } from "@/lib/services/notification-email";
+import { deliverNotificationPushes } from "@/lib/services/push";
 import { runEnrichment } from "@/lib/services/enrichment-runner";
 import { JOB, JobEnvelopeError, validateJobEnvelope } from "@/lib/queue/jobs";
 import { db } from "@/lib/db";
@@ -48,6 +49,7 @@ export async function runJob(rawName: string | undefined, data: Record<string, u
     case JOB.OPPORTUNITY_WATCHES: return refreshOpportunityWatches(workspaceId);
     case JOB.MAILBOX_SYNC: return syncWorkspaceMailboxes(workspaceId);
     case JOB.NOTIFICATION_EMAILS: return deliverNotificationEmails(workspaceId);
+    case JOB.NOTIFICATION_PUSHES: return deliverNotificationPushes(workspaceId);
     case JOB.OPPORTUNITY_ENRICHMENT: return runEnrichment(workspaceId, data.runId as string);
     case JOB.RESCORE_WORKSPACE:
       return rescoreWorkspace(workspaceId);

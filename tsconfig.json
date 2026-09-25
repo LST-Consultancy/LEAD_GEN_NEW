@@ -31,13 +31,14 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-enrichment-check/types/**/*.ts",
     ".next-linkedin-check/types/**/*.ts",
     ".next-opportunity-e2e/types/**/*.ts",
     ".next-opportunity-prod/types/**/*.ts",
     ".next-verify/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-enrichment-check/types/**/*.ts"
+    ".next-release/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

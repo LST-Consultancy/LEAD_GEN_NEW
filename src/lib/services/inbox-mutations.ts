@@ -1,11 +1,12 @@
 import "server-only";
+import { sendingReady } from "./mailbox-sending";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { type AuthContext } from "@/lib/auth/context";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate, touchLead } from "@/lib/services/mutate";
-import { isEmailConfigured, activeEmailProvider, EMAIL_NOT_CONFIGURED } from "@/lib/outreach/provider";
+import { activeEmailProvider, EMAIL_NOT_CONFIGURED } from "@/lib/outreach/provider";
 import { reviewCopy } from "@/lib/outreach/template";
 import { enqueue } from "@/lib/queue/producer";
 import { JOB } from "@/lib/queue/jobs";
@@ -67,7 +68,11 @@ export async function replyToConversation(
     );
   }
 
-  const configured = isEmailConfigured();
+  const configured = await sendingReady(ctx.workspaceId);
+  // Answer from the mailbox this thread lives in, when that mailbox can send; otherwise the
+  // workspace default decides at send time.
+  const threadBox = (await db.message.findFirst({ where: { workspaceId: ctx.workspaceId, conversationId: conversation.id, mailboxId: { not: null }, deletedAt: null }, orderBy: { createdAt: "desc" }, select: { mailboxId: true } }))?.mailboxId ?? null;
+  const replyFrom = threadBox ? await db.mailbox.findFirst({ where: { id: threadBox, workspaceId: ctx.workspaceId, revokedAt: null, sendStatus: "CONNECTED" }, select: { id: true } }) : null;
   const subject =
     input.subject ??
     conversation.subject ??
@@ -84,6 +89,7 @@ export async function replyToConversation(
         // will pick it up, DRAFT means nothing will.
         state: configured ? "QUEUED" : "DRAFT",
         fromAddress: ctx.user.email,
+        mailboxId: replyFrom?.id ?? null,
         toAddress,
         subject,
         body: input.body,
@@ -343,7 +349,7 @@ export async function decideOnMessage(
     );
   }
 
-  const configured = isEmailConfigured();
+  const configured = await sendingReady(ctx.workspaceId);
   if (input.decision === "approve" && !configured) {
     throw new MutationError(
       `Approving would put this in a send queue that cannot drain. ${EMAIL_NOT_CONFIGURED}`,

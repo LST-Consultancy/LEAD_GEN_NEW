@@ -1,4 +1,5 @@
 import "server-only";
+import { sendingReady } from "./mailbox-sending";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -7,7 +8,7 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate, softDelete } from "@/lib/services/mutate";
 import { computeTotals, reconcile, isExpired, daysUntilExpiry } from "@/lib/proposals/money";
-import { isEmailConfigured, activeEmailProvider, EMAIL_NOT_CONFIGURED } from "@/lib/outreach/provider";
+import { activeEmailProvider, EMAIL_NOT_CONFIGURED } from "@/lib/outreach/provider";
 import { emitWebhookEvent } from "@/lib/services/webhook-events";
 
 const itemSchema = z.object({
@@ -425,7 +426,7 @@ export async function sendProposal(
   }
 
   const wantsEmail = opts.byEmail ?? false;
-  if (wantsEmail && !isEmailConfigured()) {
+  if (wantsEmail && !(await sendingReady(ctx.workspaceId))) {
     throw new MutationError(EMAIL_NOT_CONFIGURED, "no_provider", 422);
   }
 

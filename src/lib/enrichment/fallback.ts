@@ -15,6 +15,15 @@ export const fallbackConfigSchema = z.object({
   order: z.array(z.enum(FALLBACK_PROVIDERS)).min(1).max(3).refine(o => new Set(o).size === o.length, "List each provider once.").default([...FALLBACK_PROVIDERS]),
   /** Provider lookups across all providers in one run; each lookup may spend one credit. */
   maxLookupsPerRun: z.number().int().min(1).max(50).default(5),
+  /** Paid lookups across every run in 24 hours, so runs started together cannot each spend a full run's allowance. */
+  maxLookupsPerDay: z.number().int().min(1).max(500).default(25),
+  /** Free calls in one run (Hunter Domain Finder, Apollo People Search, SignalHire Search) — they spend quotas, not credits. */
+  maxFreeCallsPerRun: z.number().int().min(0).max(50).default(6),
+  /**
+   * Which operations may use a fallback provider at all. An operation switched off here is not
+   * reached through any provider — turning off verification means nobody verifies.
+   */
+  operations: z.object({ company: z.boolean().default(true), people: z.boolean().default(true), emails: z.boolean().default(true), verify: z.boolean().default(true) }).default({ company: true, people: true, emails: true, verify: true }),
 });
 export type FallbackConfig = z.infer<typeof fallbackConfigSchema>;
 
@@ -56,3 +65,41 @@ export function whoToLookUp(people: LookupPerson[], haveAddress: Set<string>, ma
 
 /** Counts per provider, flattened so a stage's counts stay a flat record of numbers. */
 export const countKey = (provider: FallbackProvider, what: "tried" | "found" | "skipped" | "failed") => `${provider}_${what}`;
+
+// ── Whether a person already has a usable address (D05) ─────────────────────────────────────────
+
+/** An existing address as the database holds it. */
+export type ExistingAddress = { value: string | null; verificationResult: string; verifiedAt: Date | string | null; optedOutAt: Date | string | null; bounceCount: number; status: string };
+/**
+ * What to do for one person, and why — shown beside them, so "not searched" always has a reason.
+ * - `search`: no usable address — look one up (none on file, or the one on file is known-bad);
+ * - `skip`: an address on file is good enough, or is unconfirmed but not known-bad (check it,
+ *   don't replace it — catch-all and unknown are not invalid);
+ * - `recheck`: a confirmed address whose check is stale — verify again, don't rediscover;
+ * - `blocked`: the person or their address is suppressed — never look up another way to reach them.
+ */
+export type AddressDecision = { action: "search" | "skip" | "recheck" | "blocked"; reason: string };
+const UNCONFIRMED_LABEL: Record<string, string> = { UNCHECKED: "not yet checked", SYNTAX_VALID: "format-valid only", DOMAIN_VALID: "domain accepts mail, mailbox unconfirmed", CATCH_ALL: "on a catch-all domain", INCONCLUSIVE: "check was inconclusive", UNKNOWN: "check returned no result" };
+export const BOUNCE_LIMIT = 3;
+
+export function addressDecision(contacts: ExistingAddress[], opts: { onCompany: (email: string) => boolean; isRole: (email: string) => boolean; suppressed: Set<string>; personSuppressed: boolean; verifyCacheDays: number; now?: Date }): AddressDecision {
+  const now = (opts.now ?? new Date()).getTime();
+  if (opts.personSuppressed) return { action: "blocked", reason: "On the do-not-contact list, so no address is looked up for them." };
+  // A person-specific requirement is only met by a personal address on the company's own domain.
+  const own = contacts.filter(c => c.value && opts.onCompany(c.value) && !opts.isRole(c.value));
+  const optedOut = own.find(c => c.optedOutAt || opts.suppressed.has(c.value!.toLowerCase()));
+  if (optedOut) return { action: "blocked", reason: `Their address ${optedOut.value} is suppressed or opted out, so no replacement is looked up — that would work around their choice.` };
+  const bad = (c: ExistingAddress) => c.verificationResult === "INVALID" || c.bounceCount >= BOUNCE_LIMIT || c.status === "FAILED";
+  const fresh = (c: ExistingAddress) => Boolean(c.verifiedAt) && now - new Date(c.verifiedAt!).getTime() <= opts.verifyCacheDays * 86400000;
+  const confirmed = own.filter(c => c.verificationResult === "MAILBOX_CONFIRMED" && !bad(c));
+  const good = confirmed.find(fresh);
+  if (good) return { action: "skip", reason: `Has a confirmed address (${good.value}).` };
+  const unconfirmed = own.find(c => !bad(c) && c.verificationResult !== "MAILBOX_CONFIRMED");
+  if (unconfirmed) return { action: "skip", reason: `Has an address that is ${UNCONFIRMED_LABEL[unconfirmed.verificationResult] ?? unconfirmed.verificationResult.toLowerCase()} (${unconfirmed.value}). Check it rather than replace it — that is not the same as invalid.` };
+  const stale = confirmed[0];
+  if (stale) return { action: "recheck", reason: `Confirmed address ${stale.value} was last checked over ${opts.verifyCacheDays} days ago — due for a recheck, not a replacement.` };
+  const invalid = own.find(bad);
+  if (invalid) return { action: "search", reason: `The address on file (${invalid.value}) is ${invalid.bounceCount >= BOUNCE_LIMIT ? "bouncing" : "invalid"} — looking for a replacement.` };
+  const other = contacts.find(c => c.value && !own.includes(c));
+  return { action: "search", reason: other ? `Only ${opts.isRole(other.value!) ? "a role address" : "an address off the company's domain"} is on file (${other.value}), which does not reach them personally.` : "No address on the company's domain." };
+}

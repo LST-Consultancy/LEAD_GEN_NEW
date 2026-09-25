@@ -15,7 +15,7 @@ import { ProviderRequestError } from "@/lib/providers/provider-errors";
 import { PageFetchError } from "@/lib/opportunities/linkedin-run";
 import { parseEnrichmentConfig, estimate } from "@/lib/enrichment/config";
 import { providerState, FALLBACK_LABEL, type FallbackProvider } from "@/lib/enrichment/fallback";
-import { classifyTarget, fromApollo, fromSignalHire, type LookedUpPerson } from "@/lib/enrichment/lookup";
+import { classifyTarget, fromApollo, fromSignalHire, rankNameCandidates, type LookedUpPerson, type NameCandidate } from "@/lib/enrichment/lookup";
 import { companyDomain, linkedInCompanyUrl, mapCompanyProfile, parseSearchItems, type CompanyProfile } from "@/lib/enrichment/identity";
 import { classify } from "@/lib/enrichment/emails";
 import { normalizedCompany } from "@/lib/opportunities/identity";
@@ -104,7 +104,7 @@ export async function externalLookup(ctx: AuthContext, raw: unknown) {
   const { target, refresh } = z.object({ target: z.string().trim().min(3).max(500), refresh: z.boolean().default(false) }).parse(raw ?? {});
   const t = classifyTarget(target);
   if (t.kind === "unsupported") throw new MutationError(t.reason, "unsupported_target", 422);
-  const permission = t.kind === "person_linkedin" ? PERMISSIONS.LEADS_REVEAL : PERMISSIONS.LEADS_EDIT;
+  const permission = t.kind === "person_linkedin" || t.kind === "person_name" ? PERMISSIONS.LEADS_REVEAL : PERMISSIONS.LEADS_EDIT;
   assertPermission(ctx, permission);
   const since = new Date(Date.now() - FRESH_DAYS * 86400000);
   const cached = refresh ? null : await db.externalLookup.findFirst({ where: { workspaceId: ctx.workspaceId, targetKey: t.key, status: "FOUND", createdAt: { gte: since } }, orderBy: { createdAt: "desc" } });
@@ -140,6 +140,29 @@ export async function externalLookup(ctx: AuthContext, raw: unknown) {
       return await fail(`No match: ${tried.join("; ")}.`, "NO_MATCH");
     }
 
+    if (t.kind === "person_name") {
+      // Free searches only. Namesakes are listed for a person to choose; nothing is revealed or saved yet.
+      const providers = (await personProviders(ctx.workspaceId)).filter(p => p.usable);
+      if (!providers.length) return await fail("Searching by name needs SignalHire or Apollo connected with enrichment and storage rights. Nothing was searched or charged.", "NOT_CONNECTED");
+      const found: NameCandidate[] = []; const tried: string[] = [];
+      for (const p of providers) {
+        const key = decryptCredential(p.row!.encryptedCredentials!, ctx.workspaceId, p.provider);
+        try {
+          if (p.provider === "signalhire") {
+            for (const x of await signalHireProvider(ctx.workspaceId, key).searchByName(t.name, t.company, 10)) {
+              if (!x.fullName) continue;
+              found.push({ provider: "signalhire", ref: x.uid, fullName: x.fullName, title: x.experience?.[0]?.title ?? null, company: x.experience?.[0]?.company ?? null, location: x.location ?? null, nameIsPartial: false });
+            }
+          } else {
+            for (const x of await apolloProvider(ctx.workspaceId, key).peopleSearchByName(t.company ? `${t.name} ${t.company}` : t.name, 10)) found.push({ provider: "apollo", ref: x.id, fullName: [x.first_name, x.last_name_obfuscated].filter(Boolean).join(" ") || "(name hidden)", title: x.title ?? null, company: x.organization?.name ?? null, location: null, nameIsPartial: true });
+          }
+        } catch (error) { tried.push(`${FALLBACK_LABEL[p.provider]}: ${error instanceof ProviderRequestError && error.status === 403 ? "this key cannot use the people search" : error instanceof ProviderRequestError && (error.status === 402 || error.status === 429) ? "search quota used up" : "the search failed"}`); }
+      }
+      const ranked = rankNameCandidates(found, t.name, t.company).slice(0, 10);
+      await db.externalLookup.update({ where: { id: row.id }, data: { status: ranked.length ? "NEEDS_CONFIRMATION" : "NO_MATCH", provider: [...new Set(ranked.map(c => c.provider))].join("+") || null, candidates: ranked as unknown as Prisma.InputJsonValue, note: ranked.length ? `${ranked.length} ${ranked.length === 1 ? "person matches" : "people match"} the name${t.company ? ` (those at ${t.company} first)` : ""}. Nothing was charged for the search. Choose the right one to reveal their details — that uses one credit.${tried.length ? ` Not searched: ${tried.join("; ")}.` : ""}` : `Nobody with that name was found.${tried.length ? ` ${tried.join("; ")}.` : ""} Nothing was charged.`, finishedAt: new Date() } });
+      return { ...(await view(ctx.workspaceId, row.id)), cached: false };
+    }
+
     // Companies: Apify, on the workspace's Apify token and the enrichment Actors.
     const key = await apifyTokenFor(ctx.workspaceId, ENRICHMENT_PROVIDER);
     if (!key) return await fail("Looking up a company needs an Apify token (Apify enrichment or LinkedIn posts connection). Nothing was looked up or charged.", "NOT_CONNECTED");
@@ -147,16 +170,17 @@ export async function externalLookup(ctx: AuthContext, raw: unknown) {
     let urls: string[] = [];
     if (t.kind === "company_linkedin") urls = [t.url];
     else {
-      const search = await runLedgeredActor({ workspaceId: ctx.workspaceId, provider: ENRICHMENT_PROVIDER, key, stageKey: `lookup:${row.id}:search`, actorId: cfg.actors.search, input: { queries: `"${t.domain}" site:linkedin.com/company`, maxPagesPerQuery: 1 }, maxItems: 2, estimateUsd: estimate.search(1), maxUsd: cfg.maxUsdPerRun });
+      const search = await runLedgeredActor({ workspaceId: ctx.workspaceId, provider: ENRICHMENT_PROVIDER, key, stageKey: `lookup:${row.id}:search`, actorId: cfg.actors.search, input: { queries: `"${(t as { domain: string }).domain}" site:linkedin.com/company`, maxPagesPerQuery: 1 }, maxItems: 2, estimateUsd: estimate.search(1), maxUsd: cfg.maxUsdPerRun });
       urls = [...new Set(parseSearchItems(search.items).map(h => linkedInCompanyUrl(h.url)).filter((u): u is string => Boolean(u)))].slice(0, 3);
-      if (!urls.length) return await fail(`No LinkedIn company page mentions ${t.domain}.`, "NO_MATCH");
+      if (!urls.length) return await fail(`No LinkedIn company page mentions ${(t as { domain: string }).domain}.`, "NO_MATCH");
     }
     const pages = await runLedgeredActor({ workspaceId: ctx.workspaceId, provider: ENRICHMENT_PROVIDER, key, stageKey: `lookup:${row.id}:company`, actorId: cfg.actors.company, input: { companies: urls }, maxItems: urls.length, estimateUsd: estimate.company(urls.length), maxUsd: cfg.maxUsdPerRun });
     const profiles = pages.items.map(mapCompanyProfile).filter((p): p is CompanyProfile => Boolean(p));
     // A domain lookup accepts only a page whose own website is that domain; a mention proves nothing.
     const matches = t.kind === "domain" ? profiles.filter(p => companyDomain(p.domain) === t.domain) : profiles.slice(0, 1);
+    const asked = t.kind === "domain" ? t.domain : null;
     if (matches.length !== 1) {
-      await db.externalLookup.update({ where: { id: row.id }, data: { status: matches.length ? "NEEDS_CONFIRMATION" : "NO_MATCH", provider: "apify", candidates: profiles as unknown as Prisma.InputJsonValue, note: matches.length ? `${matches.length} company pages list ${t.kind === "domain" ? t.domain : "this"} as their website. Choose one.` : `None of the ${profiles.length} LinkedIn pages found lists ${t.kind === "domain" ? t.domain : "a website"} as its own website, so none was saved.`, finishedAt: new Date() } });
+      await db.externalLookup.update({ where: { id: row.id }, data: { status: matches.length ? "NEEDS_CONFIRMATION" : "NO_MATCH", provider: "apify", candidates: profiles as unknown as Prisma.InputJsonValue, note: matches.length ? `${matches.length} company pages list ${asked ?? "this"} as their website. Choose one.` : `None of the ${profiles.length} LinkedIn pages found lists ${asked ?? "a website"} as its own website, so none was saved.`, finishedAt: new Date() } });
       return { ...(await view(ctx.workspaceId, row.id)), cached: false };
     }
     return await mutate(ctx, permission, async () => {
@@ -178,7 +202,8 @@ export async function confirmLookup(ctx: AuthContext, id: string, raw: unknown) 
   if (row.status !== "NEEDS_CONFIRMATION") throw new MutationError("This lookup is not waiting for a choice.", "conflict", 409);
   const candidate = (row.candidates as unknown[])[index];
   if (!candidate) throw new MutationError("Choose one of the listed candidates.", "invalid_choice", 422);
-  const permission = row.kind === "person_linkedin" ? PERMISSIONS.LEADS_REVEAL : PERMISSIONS.LEADS_EDIT;
+  const permission = row.kind === "person_linkedin" || row.kind === "person_name" ? PERMISSIONS.LEADS_REVEAL : PERMISSIONS.LEADS_EDIT;
+  if (row.kind === "person_name") return revealNameCandidate(ctx, row.id, candidate as NameCandidate, index);
   return mutate(ctx, permission, async () => {
     if (row.kind === "person_linkedin") {
       const saved = await savePerson(ctx, row.id, row.provider ?? "provider", candidate as LookedUpPerson);
@@ -197,4 +222,36 @@ export async function leadLensReadiness(ctx: AuthContext) {
   const [people, token, recent] = await Promise.all([personProviders(ctx.workspaceId), apifyTokenFor(ctx.workspaceId, ENRICHMENT_PROVIDER), listExternalLookups(ctx)]);
   const usable = people.filter(p => p.usable).map(p => FALLBACK_LABEL[p.provider]);
   return { personProviders: usable, personWhy: usable.length ? null : people.map(p => p.why).join(" "), companyReady: Boolean(token), canReveal: ctx.permissions.includes(PERMISSIONS.LEADS_REVEAL), canEdit: ctx.permissions.includes(PERMISSIONS.LEADS_EDIT), recent };
+}
+
+/**
+ * Reveals the one namesake a person chose — the only paid step of a name search. Claimed first,
+ * so a double click or a retry cannot pay twice; a failed reveal returns the choice to the list.
+ */
+async function revealNameCandidate(ctx: AuthContext, lookupId: string, c: NameCandidate, index: number) {
+  assertPermission(ctx, PERMISSIONS.LEADS_REVEAL);
+  const { count } = await db.externalLookup.updateMany({ where: { id: lookupId, workspaceId: ctx.workspaceId, status: "NEEDS_CONFIRMATION" }, data: { status: "RUNNING" } });
+  if (!count) throw new MutationError("This lookup is already being revealed. Refresh to see the result.", "conflict", 409);
+  const back = async (note: string) => { await db.externalLookup.update({ where: { id: lookupId }, data: { status: "NEEDS_CONFIRMATION", note } }); throw new MutationError(note, "lookup_failed", 422); };
+  const conn = (await personProviders(ctx.workspaceId)).find(p => p.provider === c.provider && p.usable);
+  if (!conn) return back(`${FALLBACK_LABEL[c.provider]} is not connected any more, so this person cannot be revealed. Nothing was charged.`);
+  const key = decryptCredential(conn.row!.encryptedCredentials!, ctx.workspaceId, c.provider);
+  let found: LookedUpPerson | null = null;
+  try {
+    if (c.provider === "signalhire") {
+      const r = await signalHireProvider(ctx.workspaceId, key).lookupByUid(c.ref);
+      if (r.status === "credits_are_over") return back("SignalHire has no credits left. Nothing was charged.");
+      found = r.candidate ? fromSignalHire(r.candidate, r.candidate.social?.find(x => x.type === "li")?.link ?? null) : null;
+    } else {
+      const r = await apolloProvider(ctx.workspaceId, key).matchById(c.ref);
+      found = r.person ? fromApollo(r.person, "high", "") : null;
+    }
+  } catch (error) { return back(`${FALLBACK_LABEL[c.provider]} could not reveal this person (${error instanceof ProviderRequestError && error.status ? `HTTP ${error.status}` : "connection failed"}). Choose again to retry.`); }
+  if (!found) { await db.externalLookup.update({ where: { id: lookupId }, data: { status: "NO_MATCH", note: `${FALLBACK_LABEL[c.provider]} no longer has details for the chosen person.`, finishedAt: new Date() } }); return view(ctx.workspaceId, lookupId); }
+  const person = { ...found, linkedinUrl: found.linkedinUrl || null, match: "exact" as const };
+  return mutate(ctx, PERMISSIONS.LEADS_REVEAL, async () => {
+    const saved = await savePerson(ctx, lookupId, c.provider, person);
+    await db.externalLookup.update({ where: { id: lookupId }, data: { status: "FOUND", provider: c.provider, personId: saved.personId, companyId: saved.companyId, note: `Chosen by a person from the namesakes and revealed with one ${FALLBACK_LABEL[c.provider]} credit. ${saved.created ? "Saved as a new person" : "Matched a person already in the workspace; empty fields filled"}. ${saved.emailsSaved} work ${saved.emailsSaved === 1 ? "email" : "emails"} saved (unchecked).`, finishedAt: new Date() } });
+    return { result: await view(ctx.workspaceId, lookupId), log: { action: "lead_lens.name_revealed", objectType: "ExternalLookup", objectId: lookupId, after: { index, provider: c.provider, personId: saved.personId } } };
+  });
 }

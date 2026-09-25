@@ -409,6 +409,9 @@ model Workspace {
   externalLookups ExternalLookup[]
   mailboxes        Mailbox[]
   calendarConnections CalendarConnection[]
+  providerCalls    ProviderCall[]
+  pushSubscriptions PushSubscription[]
+  billingCheckouts BillingCheckout[]
 }
 
 model Role {
@@ -1374,6 +1377,10 @@ model Message {
   id             String           @id @default(uuid()) @db.Uuid
   workspaceId    String           @db.Uuid
   conversationId String           @db.Uuid
+  /// The mailbox that sent (or will send) it; null means the server relay.
+  mailboxId      String?          @db.Uuid
+  /// Set atomically before a send is attempted, so two workers or a redelivery cannot send twice.
+  sendClaimedAt  DateTime?
   direction      MessageDirection
   channel        Channel
   state          MessageState     @default(DRAFT)
@@ -1411,6 +1418,8 @@ model Sequence {
   id                String    @id @default(uuid()) @db.Uuid
   workspaceId       String    @db.Uuid
   name              String
+  /// The mailbox this sequence sends from; null uses the workspace's default sender.
+  senderMailboxId   String?   @db.Uuid
   description       String?
   isActive          Boolean   @default(false)
   stopOnReply       Boolean   @default(true)
@@ -1931,6 +1940,9 @@ model Notification {
   readAt      DateTime?
   /// Email delivery: when it was claimed for sending, when it went, and why it did not.
   emailClaimedAt DateTime?
+  /// Set before a push is attempted, so a redelivered job never pushes twice.
+  pushClaimedAt  DateTime?
+  pushedAt       DateTime?
   emailedAt   DateTime?
   emailError  String?
   createdAt   DateTime         @default(now())
@@ -2413,6 +2425,8 @@ model NotificationPreference {
   inApp       Boolean          @default(true)
   /// Also email this kind to the person. Off unless they turn it on.
   email       Boolean          @default(false)
+  /// Also push this kind to the person's subscribed browsers. Off unless they turn it on.
+  push        Boolean          @default(false)
   updatedAt   DateTime         @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -2631,11 +2645,32 @@ model Mailbox {
   workspaceId       String    @db.Uuid
   label             String
   address           String
-  imapHost          String
+  /// "imap" (IMAP reading, optional SMTP sending), "gmail" or "microsoft" (OAuth, both directions).
+  provider          String    @default("imap")
+  imapHost          String?
   imapPort          Int       @default(993)
   imapSecure        Boolean   @default(true)
-  imapUser          String
+  imapUser          String?
   encryptedPassword String?
+  /// Receiving is on unless someone turns it off; a send-only mailbox reads nothing.
+  receiveEnabled    Boolean   @default(true)
+  smtpHost          String?
+  smtpPort          Int?
+  /// "tls" (implicit, usually 465) or "starttls" (usually 587). Never plain text.
+  smtpSecurity      String?
+  smtpUser          String?
+  encryptedSmtpPassword String?
+  /// NONE (cannot send), CONNECTED, ERROR, REVOKED.
+  sendStatus        String    @default("NONE")
+  sendLastError     String?
+  sendTestedAt      DateTime?
+  fromName          String?
+  isDefaultSender   Boolean   @default(false)
+  /// OAuth tokens (gmail / microsoft), encrypted; never returned.
+  encryptedTokens   String?
+  scopes            String[]  @default([])
+  /// Provider read cursor for OAuth mailboxes (Gmail historyId, Graph receivedDateTime).
+  readCursor        String?
   folder            String    @default("INBOX")
   status            String    @default("UNTESTED")
   lastError         String?
@@ -2673,4 +2708,96 @@ model CalendarConnection {
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId, provider])
+}
+
+/// One call to a fallback provider (SignalHire, Hunter, Apollo) for one operation and target. The
+/// row is written before the call, so a redelivered job or a second press does not pay again; its
+/// outcome keeps invalid credentials, missing entitlement, quota, rate limits, transient failures,
+/// unsupported operations and genuine no-matches apart. Counting today's rows enforces the daily
+/// cap across runs that happen at the same time.
+model ProviderCall {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @db.Uuid
+  enrichmentRunId String?   @db.Uuid
+  provider        String
+  operation       String
+  targetKey       String
+  status          String    @default("STARTED")
+  detail          String?
+  units           Float     @default(0)
+  attempt         Int       @default(1)
+  createdAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, enrichmentRunId, provider, operation, targetKey])
+  @@index([workspaceId, provider, operation, targetKey, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+/// One browser's Web Push subscription for one person. Pushes carry no content: the service worker
+/// fetches the notification over the person's own session, so nothing readable passes through the
+/// push service. Removed when the push service says it is gone (404/410).
+model PushSubscription {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  userId      String    @db.Uuid
+  endpoint    String
+  p256dh      String
+  auth        String
+  userAgent   String?
+  failures    Int       @default(0)
+  lastError   String?
+  lastPushedAt DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, endpoint])
+  @@index([workspaceId, userId])
+}
+
+/// A request to pay for a plan through a payment provider (a Razorpay Payment Link). The amount
+/// is the plan's listed price at the time, in integer paise; the subscription changes only when
+/// the provider reports that exact amount paid.
+model BillingCheckout {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  provider    String
+  /// The provider's id for the link or order.
+  providerRef String
+  planId      String    @db.Uuid
+  period      String
+  amountPaise Int
+  currency    String
+  /// CREATED, PAID, MISMATCH (paid a different amount — not activated), EXPIRED, CANCELLED.
+  status      String    @default("CREATED")
+  testMode    Boolean
+  url         String?
+  paymentRef  String?
+  note        String?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  paidAt      DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerRef])
+  @@index([workspaceId, createdAt])
+}
+
+/// Every webhook a payment provider sent, keyed by its own event id, so a redelivered event is
+/// recognised and changes nothing. Payloads are kept only as the fields this app acted on.
+model BillingEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  provider    String
+  eventId     String
+  type        String
+  workspaceId String?   @db.Uuid
+  checkoutId  String?   @db.Uuid
+  outcome     String
+  detail      Json      @default("{}")
+  receivedAt  DateTime  @default(now())
+
+  @@unique([provider, eventId])
+  @@index([workspaceId, receivedAt])
 }

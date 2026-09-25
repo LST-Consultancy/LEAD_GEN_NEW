@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-release/
 /out/
 
 # production
@@ -57,3 +58,9 @@ playwright-report/
 
 # local run logs
 /logs/
+
+# Database backups never belong in source or release bundles; keep them in ../signalroom-backups
+*.sql
+!prisma/migrations/**/*.sql
+*.dump
+backup-*

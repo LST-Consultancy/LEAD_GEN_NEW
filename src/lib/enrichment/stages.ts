@@ -16,11 +16,17 @@ export const PLAN: Record<RunKind, StageKey[]> = {
   verify: ["verify"],
   enrich: ["resolve", "details", "people", "emails", "contacts", "verify", "summary"],
 };
-/** The stage whose result decides "completed with results" versus "no matches" for each button. */
-export const MAIN: Record<RunKind, StageKey[]> = { research: ["resolve", "details"], people: ["people"], emails: ["emails"], verify: ["verify"], enrich: ["resolve", "details", "people", "emails"] };
+/**
+ * The stages whose result decides "completed with results" versus "no matches" for each button.
+ * `contacts` is where fallback providers find addresses, so an address found there is a result of
+ * "Find emails" — leaving it out reported a run that saved an email as "no matches".
+ */
+export const MAIN: Record<RunKind, StageKey[]> = { research: ["resolve", "details"], people: ["people"], emails: ["emails", "contacts"], verify: ["verify"], enrich: ["resolve", "details", "people", "emails", "contacts"] };
 
 export type StageStatus = "pending" | "running" | "done" | "no_matches" | "skipped" | "needs_selection" | "blocked" | "failed" | "cancelled";
-export type Stage = { key: StageKey; status: StageStatus; counts: Record<string, number>; reason?: string; startedAt?: string; finishedAt?: string; estimatedUsd?: number; usageUsd?: number | null };
+/** One fallback provider attempt as a stage records it (see lib/services/fallback-orchestrator.ts). */
+export type StageAttempt = { provider: string; operation: string; call: string; target: string; outcome: string; detail: string; at: string };
+export type Stage = { key: StageKey; status: StageStatus; counts: Record<string, number>; reason?: string; startedAt?: string; finishedAt?: string; estimatedUsd?: number; usageUsd?: number | null; attempts?: StageAttempt[] };
 export type RunState = "QUEUED" | "RUNNING" | "COMPLETED" | "NO_MATCHES" | "PARTIAL" | "NEEDS_SELECTION" | "FAILED" | "CANCELLED";
 export const TERMINAL: RunState[] = ["COMPLETED", "NO_MATCHES", "PARTIAL", "NEEDS_SELECTION", "FAILED", "CANCELLED"];
 

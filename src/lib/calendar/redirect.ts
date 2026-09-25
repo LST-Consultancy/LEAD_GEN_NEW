@@ -1,6 +1,6 @@
 import "server-only";
 /** The OAuth callback URL, from the configured public URL (APP_URL) or the request's own origin. */
-export function calendarRedirectUri(requestUrl: string) {
+export function calendarRedirectUri(requestUrl: string, provider: "google" | "microsoft" = "google") {
   const base = process.env.APP_URL?.replace(/\/+$/, "") || new URL(requestUrl).origin;
-  return `${base}/api/calendar/google/callback`;
+  return `${base}/api/calendar/${provider}/callback`;
 }

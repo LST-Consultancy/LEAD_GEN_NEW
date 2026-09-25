@@ -94,6 +94,8 @@ export type NotificationKindStat = {
   muted: boolean;
   /** Also emailed to you. */
   email: boolean;
+  /** Also pushed to your subscribed browsers. */
+  push: boolean;
 };
 
 const WINDOW_DAYS = 30;
@@ -117,7 +119,7 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
       _count: { _all: true },
     }),
     db.notification.groupBy({ by: ["kind"], where, _max: { createdAt: true } }),
-    db.notificationPreference.findMany({ where: { workspaceId: ctx.workspaceId, userId: ctx.userId }, select: { kind: true, inApp: true, email: true } }),
+    db.notificationPreference.findMany({ where: { workspaceId: ctx.workspaceId, userId: ctx.userId }, select: { kind: true, inApp: true, email: true, push: true } }),
   ]);
 
   const kinds = Object.keys(NOTIFICATION_KIND)
@@ -134,6 +136,7 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
         lastAt: latest.find((g) => g.kind === kind)?._max.createdAt?.toISOString() ?? null,
         muted: prefs.some((p) => p.kind === kind && !p.inApp),
         email: prefs.some((p) => p.kind === kind && p.email),
+        push: prefs.some((p) => p.kind === kind && p.push),
       };
     })
     // Noisiest first: the whole point is to find what you would want to mute.
@@ -173,4 +176,17 @@ export async function setNotificationEmail(ctx: AuthContext, kind: string, email
   });
   await recordAudit(ctx, { action: email ? "notifications.email_on" : "notifications.email_off", objectType: "NotificationPreference", after: { kind } });
   return { kind, email };
+}
+
+/** Turns browser push of one kind on or off for the caller. In-app and email are unchanged. */
+export async function setNotificationPush(ctx: AuthContext, kind: string, push: boolean) {
+  if (!(kind in NOTIFICATION_KIND)) throw new MutationError("That isn't a notification kind.", "unknown_kind", 422);
+  const k = kind as NotificationKind;
+  await db.notificationPreference.upsert({
+    where: { workspaceId_userId_kind: { workspaceId: ctx.workspaceId, userId: ctx.userId, kind: k } },
+    create: { workspaceId: ctx.workspaceId, userId: ctx.userId, kind: k, push },
+    update: { push },
+  });
+  await recordAudit(ctx, { action: push ? "notifications.push_on" : "notifications.push_off", objectType: "NotificationPreference", after: { kind } });
+  return { kind, push };
 }

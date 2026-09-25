@@ -8,12 +8,19 @@ import { findStartedRun, getRun, readDataset, startRun, stableJson, waitForRun }
 import { PageFetchError } from "@/lib/opportunities/linkedin-run";
 import { complete } from "@/lib/ai/complete";
 import { parseEnrichmentConfig, estimate, type EnrichmentConfig } from "@/lib/enrichment/config";
-import { companyDomain, decide, evidenceLinks, mapCompanyProfile, parseSearchItems, safePublicHost, scoreCandidate, searchCandidates, searchQueriesFor, type CompanyProfile, type Scored } from "@/lib/enrichment/identity";
-import { assessAuthor, mapEmployee, profileKeyOf, rankPeople, roleFocuses, searchQueryFor, type PersonCandidate } from "@/lib/enrichment/people";
-import { classify, corroborateAlias, extractEmails, inferOwner, mapWebsiteItems, normalisePhone, type FoundEmail } from "@/lib/enrichment/emails";
+import { companyDomain, decide, evidenceLinks, nameKey, nameSimilarity, mapCompanyProfile, parseSearchItems, safePublicHost, scoreCandidate, searchCandidates, searchQueriesFor, type CompanyProfile, type Scored } from "@/lib/enrichment/identity";
+import { assessAuthor, focusTitleList, mapEmployee, profileKeyOf, rankPeople, relevance, roleFocuses, searchQueryFor, type Association, type PersonCandidate, type RoleFocus } from "@/lib/enrichment/people";
+import { classify, corroborateAlias, isRoleAddress, extractEmails, inferOwner, mapWebsiteItems, normalisePhone, type FoundEmail } from "@/lib/enrichment/emails";
 import { contactStatusFor, mapChecks, type CheckResult } from "@/lib/enrichment/verification";
-import { countKey, FALLBACK_LABEL, inputsMissing, providerState, whoToLookUp, type LookupPerson } from "@/lib/enrichment/fallback";
-import { lookupContact, type LookupResult } from "@/lib/providers/contact-lookup";
+import { addressDecision, countKey, FALLBACK_LABEL, FALLBACK_PROVIDERS, inputsMissing, type AddressDecision, type LookupPerson } from "@/lib/enrichment/fallback";
+import { lookupPerson } from "@/lib/providers/contact-lookup";
+import { apolloProvider } from "@/lib/providers/apollo";
+import { signalHireProvider } from "@/lib/providers/signalhire";
+import { hunterCalls } from "@/lib/providers/hunter-extra";
+import { apolloCompanyFields, apolloPerson, hunterCheck, hunterCompanyFields, hunterDomainPerson, signalHireSearchPerson, type ProviderPerson } from "@/lib/enrichment/provider-results";
+import { checkIdentity } from "@/lib/enrichment/identity-gate";
+import { attempt, attemptsSummary, providersFor, type FallbackCtx } from "./fallback-orchestrator";
+import { WAS_CALLED } from "@/lib/enrichment/provider-outcome";
 import { runStateOf, type RunKind, type Stage, type StageKey } from "@/lib/enrichment/stages";
 import { personKey } from "@/lib/opportunities/authority";
 import { refreshOpportunityFit } from "./opportunity-readiness";
@@ -54,6 +61,7 @@ type Ctx = {
   opportunity: NonNullable<Awaited<ReturnType<typeof loadOpportunity>>>;
   budgetUsd: number; spent: () => number; addSpend: (usd: number) => void;
   result: Record<string, unknown>; cancelled: () => Promise<boolean>;
+  fx: FallbackCtx;
 };
 async function loadOpportunity(workspaceId: string, id: string) {
   return db.opportunity.findFirst({ where: { id, workspaceId, deletedAt: null }, include: { company: true, sources: { where: { workspaceId } } } });
@@ -294,7 +302,7 @@ async function saveEmail(c: Ctx, companyId: string, found: FoundEmail, domain: s
     const existing = await db.contactMethod.findFirst({ where: { workspaceId: c.workspaceId, kind: "WORK_EMAIL", value: { equals: f.email, mode: "insensitive" } } });
     if (existing) { counts.alreadyKnown++; return; }
     const ownership = providerPersonId ? { basis: "provider_associated", note: `Returned by ${f.evidence.provider ?? f.evidence.kind} for this person.` } : { basis: "inferred_from_name", note: "The address contains this person's first and last name. Inferred, not confirmed as theirs." };
-    await db.contactMethod.create({ data: { workspaceId: c.workspaceId, personId, kind: "WORK_EMAIL", value: f.email, maskedValue: f.email.replace(/^(.).+@/, "$1***@"), isLocked: false, status: "UNVERIFIED", confidence: providerPersonId ? 60 : 40, source: `${f.evidence.provider ?? "apify"}:${f.evidence.kind}`, verificationResult: "UNCHECKED", provenance: { discovery: evidence, ownership, allowedExport: c.conn.allowedExport } as Prisma.InputJsonValue } });
+    await db.contactMethod.create({ data: { workspaceId: c.workspaceId, personId, kind: "WORK_EMAIL", value: f.email, maskedValue: f.email.replace(/^(.).+@/, "$1***@"), isLocked: false, status: "UNVERIFIED", confidence: providerPersonId ? 60 : 40, source: `${f.evidence.provider ?? "apify"}:${f.evidence.kind}`, verificationResult: "UNCHECKED", provenance: { discovery: evidence, ownership, ...(extra.identity ? { identity: extra.identity } : {}), allowedExport: c.conn.allowedExport } as Prisma.InputJsonValue } });
     counts[providerPersonId ? "personal" : "inferred"]++;
     return;
   }
@@ -326,8 +334,14 @@ async function recordEmailDomains(workspaceId: string, companyId: string, compan
   for (const f of found) {
     if (f.free || f.generic && f.evidence.kind === "employee_search") continue;
     const host = f.email.split("@")[1];
-    if (!host || (website && (host === website || host.endsWith(`.${website}`))) || known.has(host)) continue;
-    const verdict = corroborateAlias(host, website, companyName, f.evidence.kind);
+    if (!host || (website && (host === website || host.endsWith(`.${website}`)))) continue;
+    const prior = known.get(host);
+    // A person's decision is final: later runs never re-open an accepted or rejected domain.
+    if (prior?.decidedBy) continue;
+    const verdict = corroborateAlias(host, website, companyName, f.evidence.kind, f.evidence.url);
+    // Evidence only ever strengthens an undecided domain: official publication promotes a pending
+    // review to an alias, and weaker evidence later never demotes one.
+    if (prior && (prior.status === "alias" || prior.status === "rejected" || !verdict.accepted)) continue;
     known.set(host, { domain: host, status: verdict.accepted ? "alias" : "review", basis: verdict.basis, at: now });
   }
   const emailDomains = [...known.values()];
@@ -424,93 +438,350 @@ async function stageSummary(c: Ctx): Promise<StageOutcome> {
   return { status: "done" };
 }
 
-// ── Contact-provider fallback ────────────────────────────────────────────────────────────────────
-type LookupRecord = { at: string; outcome: "found" | "none" | "failed" | "started"; emails?: number };
-/**
- * People still without an address on the company's domain are looked up in the workspace's own
- * SignalHire, Hunter and Apollo accounts, in the configured order, stopping for a person at the
- * first provider that returns one. Every lookup is recorded on the company *before* it is made, so
- * a redelivered job or a second press within the freshness window does not pay for it again — a
- * lookup caught mid-flight is reported, not repeated blind.
+// ── Stage-level fallback (SignalHire, Hunter, Apollo) ────────────────────────────────────────────
+/*
+ * Each Apify stage runs first. When it returns no company, no people, incomplete details, or fails
+ * in a way another provider could cover, the same stage tries the configured providers that support
+ * that operation (lib/enrichment/capabilities.ts), in order, through the shared orchestrator:
+ * readiness, capability, missing inputs, ledger reservation, caps, freshness and error classes are
+ * handled there once. What Apify already saved is kept; a fallback only fills what is missing.
  */
-async function stageContacts(c: Ctx): Promise<StageOutcome> {
-  const cfg = c.conn.config.fallback;
-  if (!cfg.enabled) return { status: "skipped", reason: "Contact providers are off. Turn on the fallback in Settings → Lead Sources & APIs → Apify enrichment to try SignalHire, Hunter or Apollo for people Apify found no address for." };
-  const rows = await db.providerConnection.findMany({ where: { workspaceId: c.workspaceId, provider: { in: [...cfg.order] } } });
-  const states = cfg.order.map(p => { const r = rows.find(x => x.provider === p); return { ...providerState(p, r ? { enabled: r.enabled, allowedEnrichment: r.allowedEnrichment, allowedStorage: r.allowedStorage, hasKey: Boolean(r.encryptedCredentials), status: r.status } : null), row: r }; });
-  const usable = states.filter(s => s.usable);
-  const counts: Record<string, number> = { considered: 0, lookups: 0, found: 0, alreadyTried: 0 };
-  for (const s of states) for (const k of ["tried", "found", "skipped", "failed"] as const) counts[countKey(s.provider, k)] = 0;
-  if (!usable.length) return { status: "skipped", counts, reason: `No contact provider is ready: ${states.map(s => s.why).join(" ")}` };
-  const company = await db.company.findFirstOrThrow({ where: { id: c.opportunity.companyId, workspaceId: c.workspaceId } });
-  const domain = companyDomain(company.domain);
-  const e = readEnrichment(company.enrichment) as ReturnType<typeof readEnrichment> & { lookups?: Record<string, LookupRecord> };
-  const aliases = (e.emailDomains ?? []).filter(d => d.status === "alias").map(d => d.domain);
-  const rejected = (e.emailDomains ?? []).filter(d => d.status === "rejected").map(d => d.domain);
-  const lookups: Record<string, LookupRecord> = { ...(e.lookups ?? {}) };
-  const persist = async () => {
-    const fresh = readEnrichment((await db.company.findFirstOrThrow({ where: { id: company.id, workspaceId: c.workspaceId }, select: { enrichment: true } })).enrichment);
-    await db.company.update({ where: { id: company.id }, data: { enrichment: { ...fresh, lookups } as Prisma.InputJsonValue } });
-  };
-  const jobs = await db.employment.findMany({ where: { workspaceId: c.workspaceId, companyId: company.id, isCurrent: true }, include: { person: { include: { contactMethods: { where: { workspaceId: c.workspaceId, kind: "WORK_EMAIL" } } } } } });
-  const onCompany = (email: string | null) => { if (!email) return false; const host = email.split("@")[1]?.toLowerCase() ?? ""; return [domain, ...aliases].some(d => d && (host === d || host.endsWith(`.${d}`))); };
-  const haveAddress = new Set(jobs.filter(j => j.person.contactMethods.some(m => onCompany(m.value))).map(j => j.personId));
-  const blockedPeople = await suppressed(c.workspaceId, jobs.map(j => j.person.linkedinUrl));
-  const candidates: LookupPerson[] = jobs.filter(j => !(j.person.linkedinUrl && blockedPeople.has(j.person.linkedinUrl.toLowerCase()))).map(j => {
-    const ev = (j.evidence ?? {}) as { relevanceScore?: number };
-    return { personId: j.personId, fullName: j.person.fullName, firstName: j.person.firstName, lastName: j.person.lastName, linkedinUrl: j.person.linkedinUrl, title: j.title, relevance: (typeof ev.relevanceScore === "number" ? ev.relevanceScore : 0) + (j.isDecisionMaker ? 5 : 0) + (j.association === "current" ? 1 : 0) };
-  });
-  const targets = whoToLookUp(candidates, haveAddress, cfg.maxLookupsPerRun);
-  counts.considered = targets.length;
-  if (!targets.length) return { status: "skipped", counts, reason: candidates.length ? "Everyone found already has an address on the company's domain." : "Nobody current has been found at this company yet. Use Find people first." };
-  const people = jobs.map(j => ({ id: j.person.id, fullName: j.person.fullName, firstName: j.person.firstName, lastName: j.person.lastName }));
-  const emailCounts: Record<string, number> = { personal: 0, inferred: 0, generic: 0, unassigned: 0, review: 0, alreadyKnown: 0, suppressed: 0, setAside: 0 };
-  const notes = new Set<string>();
-  const freshMs = c.conn.config.freshDays * 86400000;
-  let budget = cfg.maxLookupsPerRun;
-  for (const person of targets) {
-    for (const s of usable) {
-      if (budget <= 0 || await c.cancelled()) break;
-      const key = `${s.provider}:${person.personId}`;
-      const prior = lookups[key];
-      if (prior && !c.refresh && Date.now() - Date.parse(prior.at) < freshMs) {
-        counts.alreadyTried++;
-        if (prior.outcome === "started") notes.add(`A ${FALLBACK_LABEL[s.provider]} lookup for ${person.fullName} was interrupted before its answer was saved; it was not repeated automatically. Use “Run again” to look them up again.`);
-        if (prior.outcome === "found") break; continue;
-      }
-      const missing = inputsMissing(s.provider, person, { name: company.name, domain });
-      if (missing) { counts[countKey(s.provider, "skipped")]++; notes.add(missing); continue; }
-      lookups[key] = { at: new Date().toISOString(), outcome: "started" }; await persist();
-      budget--; counts.lookups++; counts[countKey(s.provider, "tried")]++;
-      let result: LookupResult;
-      try { result = await lookupContact(s.provider, c.workspaceId, decryptCredential(s.row!.encryptedCredentials!, c.workspaceId, s.provider), person, { name: company.name, domain }); }
-      catch (error) {
-        counts[countKey(s.provider, "failed")]++; lookups[key] = { at: new Date().toISOString(), outcome: "failed" }; await persist();
-        notes.add(`${FALLBACK_LABEL[s.provider]}: ${error instanceof Error ? error.message : "the lookup failed"}`);
-        continue;
-      }
-      const blocked = await suppressed(c.workspaceId, result.emails.map(x => x.email));
-      let found = 0;
-      for (const x of result.emails) {
-        const f = classify(x.email, domain, { kind: "provider", url: null, excerpt: null, provider: s.provider }, aliases);
-        const before = emailCounts.personal;
-        await saveEmail(c, company.id, f, domain, aliases, people, emailCounts, blocked, person.personId, { providerStatus: x.status, providerConfidence: x.confidence, providerRef: x.ref }, rejected);
-        if (emailCounts.personal > before) found++;
-      }
-      if (result.note) notes.add(`${FALLBACK_LABEL[s.provider]}: ${result.note}`);
-      lookups[key] = { at: new Date().toISOString(), outcome: found ? "found" : "none", emails: result.emails.length }; await persist();
-      if (found) { counts.found++; counts[countKey(s.provider, "found")]++; break; }
-    }
+const COMPANY_DETAIL_FIELDS = ["industry", "employeeCount", "city", "country", "description", "linkedinUrl"] as const;
+const missingDetails = (co: { industry: string | null; employeeCount: number | null; city: string | null; country: string; description: string | null; linkedinUrl: string | null }) =>
+  COMPANY_DETAIL_FIELDS.filter(f => empty((co as Record<string, unknown>)[f]));
+
+/** Apify's stage, with a thrown failure (or a budget skip) turned into an outcome the fallback can follow. */
+async function apifyFirst(c: Ctx, run: (c: Ctx) => Promise<StageOutcome>): Promise<{ out: StageOutcome; error: unknown }> {
+  try { return { out: await run(c), error: null }; }
+  catch (error) {
+    if (error instanceof StageStop) return { out: error.outcome, error };
+    const reason = error instanceof PageFetchError ? error.message : "An unexpected error stopped this step. What earlier steps saved is kept; retry to continue from here.";
+    return { out: { status: error instanceof PageFetchError && error.message.startsWith("Cancelled") ? "cancelled" : "failed", reason }, error };
   }
-  const reason = [
-    `${counts.lookups} ${counts.lookups === 1 ? "lookup" : "lookups"} across ${usable.map(s => FALLBACK_LABEL[s.provider]).join(", ")} (at most ${cfg.maxLookupsPerRun} a run)${states.some(s => !s.usable) ? `; not used: ${states.filter(s => !s.usable).map(s => s.why).join(" ")}` : ""}.`,
-    emailCounts.generic + emailCounts.unassigned + emailCounts.review ? `${emailCounts.generic + emailCounts.unassigned + emailCounts.review} returned addresses were kept on the company instead of the person (role address or another domain).` : null,
-    ...notes,
-  ].filter(Boolean).join(" ");
-  return { status: counts.found ? "done" : counts.lookups || counts.alreadyTried ? "no_matches" : "skipped", counts: { ...counts, ...Object.fromEntries(Object.entries(emailCounts).map(([k, v]) => [`email_${k}`, v])) }, reason };
+}
+/** Combines Apify's outcome with a fallback's: a fallback that saved something makes the stage done. */
+function combine(apify: StageOutcome, fb: { saved: number; counts: Record<string, number>; reason: string; choose?: number } | null, error: unknown): StageOutcome {
+  if (!fb) { if (error && !(error instanceof StageStop)) throw error; return apify; }
+  const reason = [apify.reason ? `Apify: ${apify.reason}` : null, fb.reason].filter(Boolean).join(" ");
+  const counts = { ...(apify.counts ?? {}), ...fb.counts };
+  if (fb.saved > 0) return { status: "done", counts, reason };
+  if (apify.status === "done") return { status: "done", counts, reason };
+  // Only a company choice blocks the run; people or addresses held for review do not.
+  if (fb.choose) return { status: "needs_selection", counts, reason };
+  if (error && !(error instanceof StageStop)) return { status: "failed", counts, reason };
+  return { status: apify.status === "cancelled" ? "cancelled" : apify.status === "blocked" ? "blocked" : "no_matches", counts, reason };
 }
 
-const RUNNERS: Record<StageKey, (c: Ctx) => Promise<StageOutcome>> = { resolve: stageResolve, details: stageDetails, people: stagePeople, emails: stageEmails, contacts: stageContacts, verify: stageVerify, summary: stageSummary };
+// Company identity: name → domain, only when Apify could not resolve it.
+async function stageResolveWithFallback(c: Ctx): Promise<StageOutcome> {
+  const { out, error } = await apifyFirst(c, stageResolve);
+  if (!["no_matches", "failed"].includes(out.status) && !(error instanceof StageStop)) return out;
+  const { ready, skipped, off } = await providersFor(c.fx, "company");
+  if (off || !ready.length) return combine(out, off ? null : { saved: 0, counts: {}, reason: `No provider could look the company up: ${skipped.map(x => x.detail).join(" ")}` }, error);
+  const company = await db.company.findFirstOrThrow({ where: { id: c.opportunity.companyId, workspaceId: c.workspaceId } });
+  const evidenceDomains = new Set(evidenceLinks(c.opportunity.sources).websites.map(w => w.domain));
+  type Cand = { name: string; domain: string | null; linkedinUrl: string | null; source: string };
+  const cands: Cand[] = [];
+  for (const r of ready) {
+    let got: Cand[] = [];
+    if (r.provider === "hunter") {
+      const a = await attempt(c.fx, { provider: "hunter", operation: "company", call: "Domain Finder", targetKey: `name:${nameKey(company.name)}`, target: company.name, cost: "free" }, async () => {
+        const list = await hunterCalls(c.workspaceId, r.key).domainFinder(company.name);
+        return list.length ? { outcome: "found" as const, value: list.map(x => ({ name: x.company_name ?? x.domain, domain: companyDomain(x.domain), linkedinUrl: null, source: "hunter:domain-finder" })) } : { outcome: "no_match" as const };
+      });
+      got = a.value ?? [];
+    } else if (r.provider === "apollo") {
+      const a = await attempt(c.fx, { provider: "apollo", operation: "company", call: "Organization Search", targetKey: `name:${nameKey(company.name)}`, target: company.name, cost: "credit" }, async () => {
+        const list = await apolloProvider(c.workspaceId, r.key).orgSearch(company.name);
+        return list.length ? { outcome: "found" as const, value: list.map(o => { const f = apolloCompanyFields(o); return { name: f.name ?? company.name, domain: f.domain, linkedinUrl: f.linkedinUrl, source: "apollo:organization-search" }; }) } : { outcome: "no_match" as const };
+      });
+      got = a.value ?? [];
+    }
+    // Only candidates whose name is this company's; a different name is not this company.
+    cands.push(...got.filter(g => g.domain && nameSimilarity(company.name, g.name) !== "different"));
+    if (cands.length) break;
+  }
+  const unique = [...new Map(cands.map(x => [x.domain, x])).values()];
+  // A name alone is never enough: accept only a domain the opportunity's own sources also mention.
+  const corroborated = unique.filter(x => x.domain && evidenceDomains.has(x.domain));
+  const summary = attemptsSummary(c.fx.attempts.filter(a => a.operation === "company"));
+  if (corroborated.length === 1) {
+    const pick = corroborated[0];
+    const saved = await applyCompanyFields(c.workspaceId, company.id, { domain: pick.domain, website: `https://${pick.domain}`, ...(pick.linkedinUrl ? { linkedinUrl: pick.linkedinUrl } : {}) }, { source: pick.source, runId: c.runId, confidence: 60 });
+    await stampStage(c.workspaceId, company.id, "resolve", "resolved");
+    return combine(out, { saved: saved.updated.length || 1, counts: { fallbackResolved: 1 }, reason: `Identified through ${pick.source.split(":")[0] === "hunter" ? "Hunter" : "Apollo"}: ${pick.domain}, which the opportunity's own source also mentions. ${summary}` }, error);
+  }
+  if (unique.length) {
+    c.result.fallbackCandidates = unique;
+    return combine(out, { saved: 0, choose: unique.length, counts: { fallbackCandidates: unique.length }, reason: `Apify found no company; ${unique.length === 1 ? "one possible match was" : `${unique.length} possible matches were`} found by name (${unique.map(u => u.domain).join(", ")}). A name alone is not proof, so choose the right one below. ${summary}` }, error);
+  }
+  return combine(out, { saved: 0, counts: {}, reason: `No provider found the company. ${summary}` }, error);
+}
+
+// Company details: only the fields still empty, by domain.
+async function stageDetailsWithFallback(c: Ctx): Promise<StageOutcome> {
+  const { out, error } = await apifyFirst(c, stageDetails);
+  if (out.status === "skipped" || out.status === "cancelled") { if (error && !(error instanceof StageStop)) throw error; return out; }
+  let company = await db.company.findFirstOrThrow({ where: { id: c.opportunity.companyId, workspaceId: c.workspaceId } });
+  const domain = companyDomain(company.domain);
+  const missing = missingDetails(company);
+  if (!missing.length || !domain) return combine(out, null, error);
+  const { ready, skipped, off } = await providersFor(c.fx, "company");
+  if (off || !ready.length) return combine(out, off ? null : { saved: 0, counts: {}, reason: `Missing ${missing.join(", ")}; no provider could fill it: ${skipped.map(x => x.detail).join(" ")}` }, error);
+  let filled = 0;
+  for (const r of ready) {
+    const still = missingDetails(company);
+    if (!still.length) break;
+    const call = r.provider === "hunter" ? "Company Enrichment" : "Organization Enrichment";
+    const a = await attempt(c.fx, { provider: r.provider, operation: "company", call, targetKey: `domain:${domain}`, target: domain, cost: "credit" }, async () => {
+      const f = r.provider === "hunter" ? hunterCompanyFields(await hunterCalls(c.workspaceId, r.key).companyFind(domain)) : r.provider === "apollo" ? await apolloProvider(c.workspaceId, r.key).orgEnrich(domain).then(o => (o ? apolloCompanyFields(o) : null)) : null;
+      if (!f) return { outcome: "no_match" as const };
+      // The domain may have changed hands or be shared: a different company name is not this company.
+      if (f.name && nameSimilarity(company.name, f.name) === "different") return { outcome: "review" as const, detail: `${domain} is recorded as ${f.name}, not ${company.name}; nothing was saved from it.` };
+      return { outcome: "found" as const, value: f };
+    });
+    if (!a.value) continue;
+    const v = a.value as Record<string, unknown>;
+    const values = Object.fromEntries(still.filter(k => !empty(v[k])).map(k => [k, v[k]]));
+    if (!Object.keys(values).length) continue;
+    const saved = await applyCompanyFields(c.workspaceId, company.id, values, { source: `${r.provider}:${call.toLowerCase().replace(/ /g, "-")}`, runId: c.runId, confidence: 60 });
+    filled += saved.updated.length;
+    company = await db.company.findFirstOrThrow({ where: { id: company.id, workspaceId: c.workspaceId } });
+  }
+  if (filled) await stampStage(c.workspaceId, company.id, "details", "saved");
+  const left = missingDetails(company);
+  return combine(out, { saved: filled, counts: { fallbackFieldsFilled: filled }, reason: `${filled ? `Filled ${filled} missing ${filled === 1 ? "field" : "fields"} from other providers.` : `Other providers had nothing for ${missing.join(", ")}.`}${left.length ? ` Still unknown: ${left.join(", ")}.` : ""} ${attemptsSummary(c.fx.attempts.filter(x => x.operation === "company"))}` }, error);
+}
+
+/**
+ * A person a provider found, saved only when their identity is clear. The same LinkedIn profile or
+ * the same provider id is the same person; the same name with a different profile is someone else;
+ * the same name where one side has no comparable profile is not merged on a guess — it is held for
+ * review with its evidence.
+ */
+async function saveProviderPerson(c: Ctx, companyId: string, pp: ProviderPerson, source: string, association: Association, basis: string, relevanceFocus: RoleFocus[]): Promise<{ status: "saved" | "updated" | "review"; personId?: string; reason?: string }> {
+  const ns = (k: string | null) => (k ? k.split(":")[0] : null);
+  const byKey = pp.profileKey ? await db.person.findFirst({ where: { workspaceId: c.workspaceId, profileKey: pp.profileKey, deletedAt: null } }) : null;
+  const byUrl = !byKey && pp.linkedinUrl ? await db.person.findFirst({ where: { workspaceId: c.workspaceId, linkedinUrl: pp.linkedinUrl, deletedAt: null } }) : null;
+  if (!byKey && !byUrl) {
+    const colleagues = (await db.employment.findMany({ where: { workspaceId: c.workspaceId, companyId }, select: { person: true } })).map(e => e.person).filter(x => !x.deletedAt && personKey(x.fullName) === personKey(pp.fullName));
+    for (const x of colleagues) {
+      const comparable = x.profileKey && pp.profileKey && ns(x.profileKey) === ns(pp.profileKey);
+      if (comparable) continue; // same name, different profile of the same kind: a different person
+      return { status: "review", reason: `${pp.fullName} from ${source.split(":")[0]} may be the ${x.fullName} already saved, but there is no shared profile to prove it — not merged.` };
+    }
+  }
+  const rel = relevance(pp.title ?? "", relevanceFocus);
+  const cand: PersonCandidate = { profileKey: pp.profileKey, linkedinUrl: pp.linkedinUrl, fullName: pp.fullName, firstName: pp.firstName, lastName: pp.lastName, headline: null, title: pp.title ?? "", city: pp.city, state: null, country: null, association, associationBasis: basis, employer: pp.employer?.name ?? null, relevance: rel.score, relevanceWhy: rel.why, authority: { inferred: true, seniority: null, likelyDecisionMaker: false, basis: "From the provider's title; authority not assessed." }, emails: [], emailField: null };
+  const r = await savePerson(c, companyId, cand, source, { providerRef: pp.ref });
+  return { status: r.created ? "saved" : "updated", personId: r.personId };
+}
+
+// People: when Apify could not search (no LinkedIn page), found nobody, or found too few.
+async function stagePeopleWithFallback(c: Ctx): Promise<StageOutcome> {
+  const { out, error } = await apifyFirst(c, stagePeople);
+  if (out.status === "skipped" || out.status === "cancelled") { if (error && !(error instanceof StageStop)) throw error; return out; }
+  const company = await db.company.findFirstOrThrow({ where: { id: c.opportunity.companyId, workspaceId: c.workspaceId } });
+  const target = c.conn.config.peoplePerCompany;
+  const have = await db.employment.count({ where: { workspaceId: c.workspaceId, companyId: company.id, isCurrent: true } });
+  if (out.status === "done" && have >= target) return out;
+  const { ready, skipped, off } = await providersFor(c.fx, "people");
+  if (off || !ready.length) return combine(out, off ? null : { saved: 0, counts: {}, reason: `No other provider could look for people: ${skipped.map(x => x.detail).join(" ")}` }, error);
+  const domain = companyDomain(company.domain);
+  const askText = [c.opportunity.title, c.opportunity.service, ...c.opportunity.sources.map(src => `${src.title} ${src.description}`)].join(" ");
+  const focus = roleFocuses(c.opportunity.types, askText);
+  const titles = focusTitleList(focus, company.employeeCount !== null && company.employeeCount < 50);
+  const need = Math.max(1, target - have);
+  let saved = 0; let review = 0;
+  const reviewList: { name: string; provider: string; reason: string }[] = [];
+  const aliases = (readEnrichment(company.enrichment).emailDomains ?? []).filter(d => d.status === "alias").map(d => d.domain);
+  const emailCounts: Record<string, number> = { personal: 0, inferred: 0, generic: 0, unassigned: 0, review: 0, alreadyKnown: 0, suppressed: 0, setAside: 0 };
+  const keep = async (pp: ProviderPerson, source: string, association: Association, basis: string) => {
+    const r = await saveProviderPerson(c, company.id, pp, source, association, basis, focus);
+    if (r.status === "review") { review++; reviewList.push({ name: pp.fullName, provider: source.split(":")[0], reason: r.reason ?? "" }); return; }
+    if (r.status === "saved") saved++;
+    if (r.personId && pp.emails.length) {
+      const blocked = await suppressed(c.workspaceId, pp.emails.map(e => e.email));
+      const people = [{ id: r.personId, fullName: pp.fullName, firstName: pp.firstName, lastName: pp.lastName }];
+      for (const e of pp.emails) await saveEmail(c, company.id, classify(e.email, domain, { kind: "provider", url: null, excerpt: null, provider: source.split(":")[0] }, aliases), domain, aliases, people, emailCounts, blocked, r.personId, { providerRef: pp.ref, providerScore: e.score, providerStatus: e.providerStatus, identity: { level: "supported", basis: "Found by the provider as this person's address at the company's domain." } });
+    }
+  };
+  for (const r of ready) {
+    if (saved >= need) break;
+    if (r.provider === "signalhire") {
+      await attempt(c.fx, { provider: "signalhire", operation: "people", call: "Search by query", targetKey: `people:${nameKey(company.name)}`, target: company.name, cost: "quota" }, async () => {
+        const list = await signalHireProvider(c.workspaceId, r.key).searchPeople(company.name, titles, need * 2);
+        const people = list.map(p => signalHireSearchPerson(p, company.name)).filter((p): p is NonNullable<typeof p> => Boolean(p?.atCompany));
+        for (const p of people.slice(0, need - saved)) await keep(p, "signalhire:search", "current", `SignalHire lists ${company.name} as their most recent role (${p.title ?? "title not given"}).`);
+        return people.length ? { outcome: "found" as const } : { outcome: "no_match" as const };
+      });
+    } else if (r.provider === "hunter") {
+      if (!domain) { c.fx.attempts.push({ provider: "hunter", operation: "people", call: "Domain Search", target: company.name, outcome: "missing_input", detail: "Hunter finds people by the company's domain, which is not known yet.", at: new Date().toISOString() }); continue; }
+      await attempt(c.fx, { provider: "hunter", operation: "people", call: "Domain Search", targetKey: `people:${domain}`, target: domain, cost: "credit" }, async () => {
+        const d = await hunterCalls(c.workspaceId, r.key).domainSearch(domain, need * 2);
+        const people = d.emails.map(e => hunterDomainPerson(e, domain)).filter((p): p is ProviderPerson => Boolean(p));
+        for (const p of people.slice(0, need - saved)) await keep(p, "hunter:domain-search", "uncertain", `Hunter found their address on ${domain}; whether they still work there is not stated.`);
+        return people.length ? { outcome: "found" as const } : { outcome: "no_match" as const };
+      });
+    } else if (r.provider === "apollo") {
+      if (!domain) { c.fx.attempts.push({ provider: "apollo", operation: "people", call: "People API Search", target: company.name, outcome: "missing_input", detail: "Apollo searches people by the company's domain, which is not known yet.", at: new Date().toISOString() }); continue; }
+      const found = await attempt(c.fx, { provider: "apollo", operation: "people", call: "People API Search", targetKey: `people:${domain}`, target: domain, cost: "free" }, async () => {
+        const list = await apolloProvider(c.workspaceId, r.key).peopleSearch(domain, titles, need * 2);
+        return list.length ? { outcome: "found" as const, value: list } : { outcome: "no_match" as const };
+      });
+      // Search hides last names; each person worth keeping is revealed with a paid match, within the caps.
+      for (const hit of (found.value ?? []).slice(0, need - saved)) {
+        const m = await attempt(c.fx, { provider: "apollo", operation: "people", call: "People Enrichment by id", targetKey: `apollo:${hit.id}`, target: `${hit.first_name ?? ""} (${hit.title ?? "title not given"})`, cost: "credit" }, async () => {
+          const res = await apolloProvider(c.workspaceId, r.key).matchById(hit.id);
+          const pp = res.person ? apolloPerson(res.person, res.confidence) : null;
+          if (!pp) return { outcome: "no_match" as const };
+          const verdict = checkIdentity({ fullName: pp.fullName, company: { name: company.name, domain, aliases, linkedinUrl: company.linkedinUrl } }, { fullName: pp.fullName, employer: pp.employer, providerConfidence: pp.providerConfidence });
+          if (verdict.level === "conflict" || verdict.level === "weak") return { outcome: "review" as const, detail: verdict.reasons.join(" "), value: null };
+          return { outcome: "found" as const, value: pp };
+        });
+        if (m.value) await keep(m.value, "apollo:people-enrichment", "current", "Apollo lists them at this company now.");
+        if (m.record.outcome === "review") { review++; reviewList.push({ name: hit.first_name ?? "someone", provider: "apollo", reason: m.record.detail }); }
+        if (m.record.outcome === "budget" || m.record.outcome === "cancelled") break;
+      }
+    }
+    if (c.fx.attempts.some(a => a.outcome === "budget" || a.outcome === "cancelled")) break;
+  }
+  if (reviewList.length) c.result.peopleReview = [...((c.result.peopleReview as unknown[]) ?? []), ...reviewList];
+  if (saved) await stampStage(c.workspaceId, company.id, "people", "found");
+  return combine(out, { saved, counts: { fallbackSaved: saved, fallbackReview: review, ...(emailCounts.personal ? { fallbackEmails: emailCounts.personal } : {}) }, reason: `${saved ? `${saved} ${saved === 1 ? "person" : "people"} found through other providers.` : "Other providers found nobody new."}${review ? ` ${review} held for review — their identity could not be confirmed.` : ""} ${attemptsSummary(c.fx.attempts.filter(a => a.operation === "people"))}` }, error);
+}
+
+// Business email for each person who needs one (D04 identity gate, D05 usable-address rule).
+async function stageContacts(c: Ctx): Promise<StageOutcome> {
+  const { ready, skipped, off } = await providersFor(c.fx, "emails");
+  if (off) return { status: "skipped", reason: `${off} Apify's own email discovery above still ran.` };
+  const counts: Record<string, number> = { considered: 0, searched: 0, found: 0, review: 0, skippedHasAddress: 0, recheck: 0, blocked: 0 };
+  for (const p of FALLBACK_PROVIDERS) for (const k of ["tried", "found", "skipped", "failed"] as const) counts[countKey(p, k)] = 0;
+  if (!ready.length) return { status: "skipped", counts, reason: `No contact provider is ready: ${skipped.map(x => x.detail).join(" ")}` };
+  const company = await db.company.findFirstOrThrow({ where: { id: c.opportunity.companyId, workspaceId: c.workspaceId } });
+  const domain = companyDomain(company.domain);
+  const e = readEnrichment(company.enrichment);
+  const aliases = (e.emailDomains ?? []).filter(d => d.status === "alias").map(d => d.domain);
+  const rejected = (e.emailDomains ?? []).filter(d => d.status === "rejected").map(d => d.domain);
+  const onCompany = (email: string) => { const host = email.split("@")[1]?.toLowerCase() ?? ""; return [domain, ...aliases].some(d => d && (host === d || host.endsWith(`.${d}`))); };
+  const jobs = await db.employment.findMany({ where: { workspaceId: c.workspaceId, companyId: company.id, isCurrent: true }, include: { person: { include: { contactMethods: { where: { workspaceId: c.workspaceId, kind: { in: ["WORK_EMAIL", "PERSONAL_EMAIL"] } } } } } } });
+  const allValues = jobs.flatMap(j => [j.person.linkedinUrl, ...j.person.contactMethods.map(m => m.value)]);
+  const blockedValues = await suppressed(c.workspaceId, allValues);
+  const decisions: { personId: string; name: string; action: AddressDecision["action"] | "review" | "found" | "none"; reason: string }[] = [];
+  const candidates: (LookupPerson & { decision: AddressDecision })[] = [];
+  for (const j of jobs) {
+    const d = addressDecision(j.person.contactMethods.map(m => ({ value: m.value, verificationResult: m.verificationResult, verifiedAt: m.verifiedAt, optedOutAt: m.optedOutAt, bounceCount: m.bounceCount, status: m.status })), { onCompany, isRole: isRoleAddress, suppressed: blockedValues, personSuppressed: Boolean(j.person.linkedinUrl && blockedValues.has(j.person.linkedinUrl.toLowerCase())), verifyCacheDays: c.conn.config.verifyCacheDays });
+    if (d.action !== "search") { counts[d.action === "skip" ? "skippedHasAddress" : d.action]++; decisions.push({ personId: j.personId, name: j.person.fullName, action: d.action, reason: d.reason }); continue; }
+    const ev = (j.evidence ?? {}) as { relevanceScore?: number };
+    candidates.push({ personId: j.personId, fullName: j.person.fullName, firstName: j.person.firstName, lastName: j.person.lastName, linkedinUrl: j.person.linkedinUrl, title: j.title, relevance: (typeof ev.relevanceScore === "number" ? ev.relevanceScore : 0) + (j.isDecisionMaker ? 5 : 0) + (j.association === "current" ? 1 : 0), decision: d });
+  }
+  const targets = candidates.sort((a, b) => b.relevance - a.relevance);
+  counts.considered = targets.length;
+  if (!targets.length) {
+    c.result.contactDecisions = decisions;
+    return { status: "skipped", counts, reason: jobs.length ? `Nobody needs a new address: ${counts.skippedHasAddress} already have one, ${counts.recheck} are due a recheck, ${counts.blocked} are suppressed.` : "Nobody current has been found at this company yet, so there is nobody to find an address for." };
+  }
+  const people = jobs.map(j => ({ id: j.person.id, fullName: j.person.fullName, firstName: j.person.firstName, lastName: j.person.lastName }));
+  const emailCounts: Record<string, number> = { personal: 0, inferred: 0, generic: 0, unassigned: 0, review: 0, alreadyKnown: 0, suppressed: 0, setAside: 0 };
+  let stop = false;
+  for (const person of targets) {
+    if (stop) break;
+    let result: "found" | "review" | "none" = "none"; const why: string[] = [person.decision.reason];
+    for (const r of ready) {
+      const provider = r.provider;
+      const missing = inputsMissing(provider, person, { name: company.name, domain });
+      if (missing) { counts[countKey(provider, "skipped")]++; c.fx.attempts.push({ provider, operation: "emails", call: "—", target: person.fullName, outcome: "missing_input", detail: missing, at: new Date().toISOString() }); continue; }
+      counts[countKey(provider, "tried")]++;
+      const a = await attempt(c.fx, { provider, operation: "emails", call: provider === "signalhire" ? "Person API" : provider === "hunter" ? "Email Finder" : "People Enrichment", targetKey: `person:${person.personId}`, target: person.fullName, cost: "credit" }, async () => {
+        const got = await lookupPerson(provider, c.workspaceId, r.key, person, { name: company.name, domain });
+        if (!got || !got.emails.length) return { outcome: "no_match" as const, detail: got?.note };
+        // Identity: is the provider's person the one asked about? Domain agreement is not evidence.
+        const verdict = checkIdentity({ fullName: person.fullName, firstName: person.firstName, lastName: person.lastName, linkedinUrl: person.linkedinUrl, company: { name: company.name, domain, aliases, linkedinUrl: company.linkedinUrl } }, { fullName: got.fullName, firstName: got.firstName, lastName: got.lastName, linkedinUrl: got.linkedinUrl, employer: got.employer, providerConfidence: got.providerConfidence, askedByProfile: provider === "signalhire" || (provider === "apollo" && Boolean(person.linkedinUrl)) });
+        return verdict.attach ? { outcome: "found" as const, value: { got, verdict } } : { outcome: "review" as const, value: { got, verdict }, detail: verdict.reasons.join(" ") };
+      });
+      if (a.record.outcome === "budget" || a.record.outcome === "cancelled") { stop = true; why.push(a.record.detail); break; }
+      if (!["found", "review"].includes(a.record.outcome)) { if (!["no_match", "cached"].includes(a.record.outcome)) counts[countKey(provider, "failed")]++; why.push(`${FALLBACK_LABEL[provider]}: ${a.record.detail}`); continue; }
+      const { got, verdict } = a.value!;
+      const blocked = await suppressed(c.workspaceId, got.emails.map(x => x.email));
+      if (verdict.attach) {
+        const before = emailCounts.personal;
+        for (const x of got.emails) await saveEmail(c, company.id, classify(x.email, domain, { kind: "provider", url: null, excerpt: null, provider }, aliases), domain, aliases, people, emailCounts, blocked, person.personId, { providerStatus: x.providerStatus, providerScore: x.score, providerRef: got.ref, identity: { level: verdict.level, reasons: verdict.reasons, provider } }, rejected);
+        if (emailCounts.personal > before) { result = "found"; counts.found++; counts[countKey(provider, "found")]++; why.push(`${FALLBACK_LABEL[provider]}: ${verdict.reasons.join(" ")}`); break; }
+        why.push(`${FALLBACK_LABEL[provider]} returned only addresses that are not theirs on the company's domain (role address, another domain, or suppressed).`);
+        continue;
+      }
+      // Not proven to be them: kept on the company as a possible match, never attached — and the next provider is tried.
+      for (const x of got.emails) await saveReviewEmail(c, company.id, x.email, domain, aliases, person.personId, { provider, providerRef: got.ref, providerStatus: x.providerStatus, candidate: { fullName: got.fullName, linkedinUrl: got.linkedinUrl, employer: got.employer, providerConfidence: got.providerConfidence }, identity: { level: verdict.level, reasons: verdict.reasons } }, blocked);
+      result = "review"; why.push(`${FALLBACK_LABEL[provider]}: held for review — ${verdict.reasons.join(" ")}`);
+    }
+    if (result === "review") counts.review++;
+    counts.searched++;
+    decisions.push({ personId: person.personId, name: person.fullName, action: result, reason: why.join(" ") });
+  }
+  c.result.contactDecisions = decisions;
+  const mine = c.fx.attempts.filter(a => a.operation === "emails");
+  counts.lookups = mine.filter(a => WAS_CALLED.includes(a.outcome)).length;
+  counts.alreadyTried = mine.filter(a => a.outcome === "cached").length;
+  const reason = [
+    `${counts.searched} ${counts.searched === 1 ? "person" : "people"} needed an address; ${counts.found} found${counts.review ? `, ${counts.review} held for review` : ""}.`,
+    counts.skippedHasAddress + counts.recheck + counts.blocked ? `Not searched: ${counts.skippedHasAddress} already have one, ${counts.recheck} are due a recheck, ${counts.blocked} are suppressed.` : null,
+    attemptsSummary(mine.filter(a => a.outcome !== "not_connected" && a.outcome !== "unsupported")),
+    skipped.length ? `Not asked: ${skipped.map(x => x.detail).join(" ")}` : null,
+  ].filter(Boolean).join(" ");
+  // Addresses held for review were saved (as company contacts naming the possible owner), so the
+  // step produced something to act on; they never block the rest of the run.
+  return { status: counts.found || counts.review ? "done" : "no_matches", counts: { ...counts, ...Object.fromEntries(Object.entries(emailCounts).map(([k, v]) => [`email_${k}`, v])) }, reason };
+}
+
+/** An address whose owner is not proven: a company contact naming the possible owner, with the evidence. */
+async function saveReviewEmail(c: Ctx, companyId: string, email: string, domain: string | null, aliases: string[], possiblePersonId: string, review: Record<string, unknown>, blocked: Set<string>) {
+  const f = classify(email, domain, { kind: "provider", url: null, excerpt: null, provider: String(review.provider) }, aliases);
+  if (blocked.has(f.email)) return;
+  const where = { workspaceId_companyId_value: { workspaceId: c.workspaceId, companyId, value: f.email } };
+  if (await db.companyContactPoint.findUnique({ where })) return;
+  if (await db.contactMethod.findFirst({ where: { workspaceId: c.workspaceId, value: { equals: f.email, mode: "insensitive" } } })) return;
+  await db.companyContactPoint.create({ data: { workspaceId: c.workspaceId, companyId, kind: "EMAIL", value: f.email, isGeneric: f.generic, domainStatus: f.domainStatus, possiblePersonId: f.generic ? null : possiblePersonId, source: `${review.provider}:provider`, evidence: { kind: "provider", runId: c.runId, retrievedAt: new Date().toISOString(), note: "Returned by a provider for this person, but their identity was not confirmed. Not attached until someone confirms it.", review } as Prisma.InputJsonValue } });
+}
+
+// Verification: Apify first; Hunter's verifier for addresses Apify could not check.
+async function stageVerifyWithFallback(c: Ctx): Promise<StageOutcome> {
+  const { out, error } = await apifyFirst(c, stageVerify);
+  if (out.status === "skipped" && !(error instanceof StageStop)) return out;
+  if (out.status === "cancelled") return out;
+  const companyId = c.opportunity.companyId;
+  const cutoff = new Date(Date.now() - c.conn.config.verifyCacheDays * 86400000);
+  // What is still unchecked or stale after Apify's pass — exactly what the fallback may pick up.
+  const personal = await db.contactMethod.findMany({ where: { workspaceId: c.workspaceId, kind: { in: ["WORK_EMAIL", "PERSONAL_EMAIL"] }, value: { not: null }, OR: [{ verifiedAt: null }, { verifiedAt: { lt: cutoff } }, { verificationResult: "UNKNOWN" }], person: { employments: { some: { workspaceId: c.workspaceId, companyId, isCurrent: true } } } } });
+  const points = await db.companyContactPoint.findMany({ where: { workspaceId: c.workspaceId, companyId, kind: "EMAIL", domainStatus: { in: ["matched", "alias"] }, OR: [{ verifiedAt: null }, { verifiedAt: { lt: cutoff } }, { verificationResult: "UNKNOWN" }] } });
+  const pending = [...personal.map(p => ({ id: p.id, table: "contact" as const, email: p.value!, provenance: p.provenance })), ...points.map(p => ({ id: p.id, table: "point" as const, email: p.value, provenance: null }))];
+  if (!pending.length) return combine(out, null, error);
+  const { ready, skipped, off } = await providersFor(c.fx, "verify");
+  if (off || !ready.length) return combine(out, off ? null : { saved: 0, counts: {}, reason: `${pending.length} addresses are still unchecked; no other provider can verify: ${skipped.map(x => x.detail).join(" ")}` }, error);
+  const blocked = await suppressed(c.workspaceId, pending.map(p => p.email));
+  let checked = 0; const results: Record<string, number> = {};
+  for (const target of pending.filter(p => !blocked.has(p.email.toLowerCase())).slice(0, c.conn.config.emailChecksPerRun)) {
+    let done = false;
+    for (const r of ready) {
+      if (r.provider !== "hunter") continue; // only Hunter verifies (capabilities.ts)
+      const a = await attempt(c.fx, { provider: "hunter", operation: "verify", call: "Email Verifier", targetKey: `verify:${target.email.toLowerCase()}`, target: target.email, cost: "credit" }, async () => {
+        const d = await hunterCalls(c.workspaceId, r.key).verify(target.email);
+        return { outcome: "found" as const, value: { ...hunterCheck(d), raw: d } };
+      });
+      if (a.record.outcome === "budget" || a.record.outcome === "cancelled") { done = true; break; }
+      if (!a.value) continue;
+      const now = new Date();
+      const verification = { method: "hunter", checkedAt: now.toISOString(), result: a.value.result, reason: a.value.reason, raw: { status: a.value.raw.status, score: a.value.raw.score ?? null, smtp_check: a.value.raw.smtp_check ?? null, accept_all: a.value.raw.accept_all ?? null }, runId: c.runId };
+      if (target.table === "contact") await db.contactMethod.update({ where: { id: target.id }, data: { verificationResult: a.value.result, status: contactStatusFor(a.value.result), verifiedAt: now, provenance: { ...((target.provenance as Record<string, unknown>) ?? {}), verification } as Prisma.InputJsonValue } });
+      else await db.companyContactPoint.update({ where: { id: target.id }, data: { verificationResult: a.value.result, verifiedAt: now, verification: verification as Prisma.InputJsonValue } });
+      checked++; results[a.value.result] = (results[a.value.result] ?? 0) + 1;
+      break;
+    }
+    if (done) break;
+  }
+  return combine(out, { saved: checked, counts: { fallbackChecked: checked, ...Object.fromEntries(Object.entries(results).map(([k, v]) => [`hunter_${k}`, v])) }, reason: `${checked ? `${checked} ${checked === 1 ? "address" : "addresses"} checked with Hunter's verifier.` : "No other provider checked anything."} ${attemptsSummary(c.fx.attempts.filter(a => a.operation === "verify"))}` }, error);
+}
+
+const RUNNERS: Record<StageKey, (c: Ctx) => Promise<StageOutcome>> = { resolve: stageResolveWithFallback, details: stageDetailsWithFallback, people: stagePeopleWithFallback, emails: stageEmails, contacts: stageContacts, verify: stageVerifyWithFallback, summary: stageSummary };
 // Stages that cannot run without a resolved company, blocked while a person chooses it.
 const NEEDS_IDENTITY: StageKey[] = ["details", "people", "emails"];
 
@@ -536,8 +807,9 @@ export async function runEnrichment(workspaceId: string, runId: string) {
   await db.enrichmentRun.update({ where: { id: runId }, data: { state: "RUNNING", startedAt: run.startedAt ?? new Date() } });
   let spent = run.spentUsd;
   const auth: AuthContext = { userId: member.userId, sessionId: "worker", user: member.user, workspaceId, workspace: member.workspace, memberId: member.id, roleKey: member.role.key, roleName: member.role.name, permissions: member.role.permissions, workspaces: [] };
+  const cancelled = async () => Boolean((await db.enrichmentRun.findFirst({ where: { id: runId, workspaceId }, select: { cancelRequestedAt: true } }))?.cancelRequestedAt);
   const c: Ctx = { workspaceId, runId, kind: run.kind as RunKind, refresh: run.refresh, conn, auth, opportunity, budgetUsd: run.budgetUsd, spent: () => spent, addSpend: usd => { spent += usd; }, result,
-    cancelled: async () => Boolean((await db.enrichmentRun.findFirst({ where: { id: runId, workspaceId }, select: { cancelRequestedAt: true } }))?.cancelRequestedAt) };
+    cancelled, fx: { workspaceId, runId, refresh: run.refresh, freshDays: conn.config.verifyCacheDays, cfg: conn.config.fallback, cancelled, attempts: [] } };
   const save = () => db.enrichmentRun.update({ where: { id: runId }, data: { stages: stages as unknown as Prisma.InputJsonValue, result: result as Prisma.InputJsonValue, spentUsd: spent } });
 
   for (const stage of stages) {
@@ -549,8 +821,10 @@ export async function runEnrichment(workspaceId: string, runId: string) {
     await save();
     const before = spent;
     try {
+      const seen = c.fx.attempts.length;
       const out = await RUNNERS[stage.key](c);
-      Object.assign(stage, { status: out.status, counts: out.counts ?? {}, reason: out.reason });
+      const attempts = c.fx.attempts.slice(seen);
+      Object.assign(stage, { status: out.status, counts: out.counts ?? {}, reason: out.reason, ...(attempts.length ? { attempts } : {}) });
     } catch (error) {
       if (error instanceof StageStop) Object.assign(stage, { status: error.outcome.status, reason: error.outcome.reason });
       else if (error instanceof PageFetchError) Object.assign(stage, { status: error.message.startsWith("Cancelled") ? "cancelled" : "failed", reason: error.message });

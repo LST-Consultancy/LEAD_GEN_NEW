@@ -20,11 +20,14 @@ const connect = (w: Awaited<ReturnType<typeof workspace>>, provider: string, api
 const CANDIDATE = { uid: "c".repeat(32), fullName: "Meera Synthetic", headLine: "VP Procurement at Contoso Synthetic", locations: [{ name: "Pune, Maharashtra, India" }], experience: [{ company: "Contoso Synthetic", position: "VP Procurement", current: true, website: "https://contoso-synthetic.example" }], contacts: [{ type: "email", value: "meera@contoso-synthetic.example", subType: "work", rating: 100 }, { type: "email", value: "info@contoso-synthetic.example", subType: "work", rating: 70 }, { type: "email", value: "meera.home@gmail.com", subType: "personal", rating: 100 }] };
 
 describe("reading a lookup target", () => {
-  it("accepts a profile, a company page or a domain, and refuses a bare name", () => {
+  it("accepts a profile, a company page, a domain or a person's full name, and refuses a single word", () => {
     expect(classifyTarget("https://www.linkedin.com/in/meera-synthetic/")).toMatchObject({ kind: "person_linkedin", key: "li:meera-synthetic" });
     expect(classifyTarget("linkedin.com/company/contoso-synthetic")).toMatchObject({ kind: "company_linkedin" });
     expect(classifyTarget("contoso-synthetic.example")).toMatchObject({ kind: "domain", domain: "contoso-synthetic.example" });
-    expect(classifyTarget("Meera Synthetic")).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("workspace only") });
+    expect(classifyTarget("Meera Synthetic")).toMatchObject({ kind: "person_name", name: "Meera Synthetic", company: null });
+    expect(classifyTarget("Meera Synthetic at Contoso Synthetic")).toMatchObject({ kind: "person_name", name: "Meera Synthetic", company: "Contoso Synthetic" });
+    expect(classifyTarget("Meera")).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("single word") });
+    expect(classifyTarget("R2 D2")).toMatchObject({ kind: "unsupported" });
   });
   it("maps SignalHire and Apollo answers without personal emails, and keeps Apollo's confidence", () => {
     const p = fromSignalHire(CANDIDATE, "https://www.linkedin.com/in/meera-synthetic")!;
@@ -103,5 +106,39 @@ describe("People Finder evidence filters", () => {
     expect(await names({ switching: true })).toEqual(["Migrating Person"]);
     expect(await names({ origin: "import" })).toEqual(["Hiring Person"]);
     expect(await names({ attachment: "is_lead" })).toEqual([]);
+  });
+});
+
+describe("searching by a bare name", () => {
+  it("lists namesakes from the free searches without charging, then reveals only the one a person chooses, once", async () => {
+    const w = await workspace();
+    await connect(w, "signalhire", "sh-key"); await connect(w, "apollo", "ap-key");
+    const calls: { provider: string; url: string; body?: Record<string, unknown> }[] = [];
+    vi.mocked(providerJson).mockImplementation((async (_w: string, provider: string, url: string, _h: unknown, body?: Record<string, unknown>) => {
+      calls.push({ provider, url, body });
+      if (url.endsWith("/candidate/searchByQuery")) return { total: 2, profiles: [{ uid: "a".repeat(32), fullName: "Meera Synthetic", location: "Mumbai, India", experience: [{ company: "Other Synthetic", title: "Analyst" }] }, { uid: "b".repeat(32), fullName: "Meera Synthetic", location: "Pune, India", experience: [{ company: "Contoso Synthetic", title: "VP Procurement" }] }] };
+      if (url.endsWith("/mixed_people/api_search")) return { people: [{ id: "ap-9", first_name: "Meera", last_name_obfuscated: "Sy***c", title: "Designer", organization: { name: "Third Synthetic" } }] };
+      if (url.endsWith("/candidate/search")) return [{ item: "b".repeat(32), status: "success", candidate: { ...CANDIDATE, uid: "b".repeat(32), social: [{ type: "li", link: "https://www.linkedin.com/in/meera-synthetic" }] } }];
+      throw new Error(`test: unexpected ${url}`);
+    }) as never);
+    const r = await externalLookup(w.ctx, { target: "Meera Synthetic at Contoso Synthetic" });
+    expect(r).toMatchObject({ status: "NEEDS_CONFIRMATION", note: expect.stringContaining("Nothing was charged") });
+    const cands = r.candidates as { provider: string; company: string; nameIsPartial: boolean }[];
+    // The asked-for company first; Apollo's hidden last name is labelled as such.
+    expect(cands[0]).toMatchObject({ provider: "signalhire", company: "Contoso Synthetic" });
+    expect(cands.find(c => c.provider === "apollo")).toMatchObject({ nameIsPartial: true });
+    // Only free search endpoints were called so far.
+    expect(calls.map(c => c.url.split("/").pop())).toEqual(["searchByQuery", "api_search"]);
+    expect(await db.person.count({ where: { workspaceId: w.workspace.id } })).toBe(0);
+    // Another workspace cannot choose for it.
+    const other = await workspace();
+    await expect(confirmLookup(other.ctx, r.id, { index: 0 })).rejects.toThrow();
+    const saved = await confirmLookup(w.ctx, r.id, { index: 0 });
+    expect(saved).toMatchObject({ status: "FOUND", note: expect.stringContaining("one SignalHire credit"), person: { fullName: "Meera Synthetic" } });
+    expect(calls.filter(c => c.url.endsWith("/candidate/search"))).toHaveLength(1);
+    expect(calls.find(c => c.url.endsWith("/candidate/search"))!.body).toMatchObject({ items: ["b".repeat(32)], withoutWaterfall: true });
+    // A second click is refused, not paid for again.
+    await expect(confirmLookup(w.ctx, r.id, { index: 0 })).rejects.toThrow(/not waiting/);
+    expect(calls.filter(c => c.url.endsWith("/candidate/search"))).toHaveLength(1);
   });
 });

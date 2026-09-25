@@ -4,6 +4,8 @@ import { ProviderRequestError } from "./provider-errors";
 import { signalHireProvider } from "./signalhire";
 import { hunterProvider } from "./hunter";
 import { apolloProvider } from "./apollo";
+import { hunterCalls } from "./hunter-extra";
+import { apolloPerson, signalHireCandidate, type ProviderPerson } from "@/lib/enrichment/provider-results";
 
 /** Addresses one provider returned for one person, with the provider's own words about them — never a verification of ours. */
 export type LookupResult = { emails: { email: string; status: string | null; confidence: number | null; ref: string | null }[]; note?: string };
@@ -40,4 +42,41 @@ export async function lookupContact(provider: FallbackProvider, workspaceId: str
     }
     throw new Error("the answer could not be read.");
   }
+}
+
+/**
+ * The stage fallback's version of one lookup: the provider's *person* as well as the addresses, so
+ * the identity gate can compare them with the person asked about. Provider errors are not caught
+ * here — the orchestrator classifies them (key refused, quota, rate limit, transient, malformed).
+ */
+export type PersonLookup = ProviderPerson & { note?: string };
+export async function lookupPerson(provider: FallbackProvider, workspaceId: string, apiKey: string, p: LookupPerson, company: LookupCompany): Promise<PersonLookup | null> {
+  if (provider === "signalhire") {
+    const r = await signalHireProvider(workspaceId, apiKey).lookupByLinkedIn(p.linkedinUrl!);
+    if (r.status === "credits_are_over") throw new ProviderRequestError("SignalHire has no credits left.", "http", 402);
+    if (!r.candidate) return null;
+    const person = signalHireCandidate(r.candidate);
+    // Asked for this exact profile, so the profile is the one on file even when SignalHire omits the link.
+    return { ...person, linkedinUrl: person.linkedinUrl ?? p.linkedinUrl };
+  }
+  if (provider === "hunter") {
+    const d = await hunterCalls(workspaceId, apiKey).emailFinder(company.domain!, p.firstName!, p.lastName!);
+    if (!d.email) return null;
+    // Hunter answers for the name and domain it was given; its score is how sure it is of the pattern.
+    const score = d.score ?? null;
+    return {
+      fullName: p.fullName, firstName: p.firstName, lastName: p.lastName, title: d.position ?? null, linkedinUrl: d.linkedin_url ?? null, profileKey: null, city: null,
+      employer: { domain: company.domain, name: d.company ?? null, current: null },
+      emails: [{ email: d.email.toLowerCase(), label: "email_finder", score, providerStatus: d.verification?.status ?? (d.accept_all ? "accept_all" : null) }],
+      ref: "hunter:email-finder", providerConfidence: score === null ? null : score >= 70 ? "high" : score >= 40 ? "medium" : "low",
+    };
+  }
+  const r = await apolloProvider(workspaceId, apiKey).matchPerson(p, company);
+  if (!r.person) return null;
+  // A match with no name can still carry an address; it goes to the identity gate with nothing to
+  // compare, so it is never attached to a person (a role address is kept on the company).
+  const person = apolloPerson(r.person, r.confidence) ?? apolloPerson({ ...r.person, name: "(no name given)" }, r.confidence);
+  if (!person) return null;
+  if (!apolloPerson(r.person, r.confidence)) return { ...person, fullName: "", firstName: null, lastName: null };
+  return person.emails.length ? person : { ...person, emails: [], note: "Apollo found the person but no business email." };
 }

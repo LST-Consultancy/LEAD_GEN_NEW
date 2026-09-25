@@ -73,6 +73,12 @@ not chosen, and they pass in all-pairs mode in both themes.
 | Reading replies from a mailbox | `lib/services/mailboxes.ts`; gate stop-on-reply on `readsReplies(workspaceId)` |
 | A calendar event for a booking | `syncBookingEvent` in `lib/services/calendar.ts`; call it after the booking is saved, never instead of saving it |
 | A PDF download | `renderPdf` in `lib/pdf/simple.ts` |
+| A fallback provider call in enrichment | `attempt()` in `lib/services/fallback-orchestrator.ts`; what a provider can do is `lib/enrichment/capabilities.ts` |
+| Whether a provider's person is the one asked about | `checkIdentity` in `lib/enrichment/identity-gate.ts` — domain agreement is never identity |
+| Whether a person needs an address searched | `addressDecision` in `lib/enrichment/fallback.ts` |
+| Choosing which mailbox sends a message | `senderFor` in `lib/services/mailbox-sending.ts`; gate on `sendingReady(workspaceId)`, not `isEmailConfigured()` |
+| Browser push | `lib/push/webpush.ts` (payload-less, VAPID); delivery in `lib/services/push.ts` |
+| Taking a payment | `lib/services/billing.ts` (Razorpay Payment Links); the plan changes only in the signed webhook |
 
 Prisma `Decimal` and `Date` must not cross into components. Convert once at the
 service boundary with `toPlain()` from `lib/serialize.ts`.

@@ -8,7 +8,7 @@ import { ProviderRequestError } from "@/lib/providers/provider-errors";
 import { complete } from "@/lib/ai/complete";
 import { makeWorkspace, cleanup, db } from "./helpers/fixtures";
 import { connectOpportunityProvider, testOpportunityProvider } from "@/lib/services/opportunity-providers";
-import { cancelEnrichment, decideEmailDomain, getEnrichmentRun, getOpportunityEnrichment, retryEnrichment, selectEnrichmentCompany, startEnrichment } from "@/lib/services/enrichment";
+import { cancelEnrichment, decideContactPoint, decideEmailDomain, getEnrichmentRun, getOpportunityEnrichment, retryEnrichment, selectEnrichmentCompany, startEnrichment } from "@/lib/services/enrichment";
 import { runEnrichment } from "@/lib/services/enrichment-runner";
 import { getOpportunityReadiness } from "@/lib/services/opportunity-readiness";
 import { opportunityToCrm } from "@/lib/services/opportunity-actions";
@@ -186,6 +186,22 @@ describe("Find emails and Check emails", () => {
     expect(await db.auditLog.count({ where: { workspaceId: w.workspace.id, action: "company.email_domain_decided" } })).toBe(1);
   });
 
+  it("D02: a same-name domain is accepted only when the company's own website publishes it; the same label elsewhere stays in review, and a later official sighting promotes it", async () => {
+    const w = await atzean();
+    // The post (not official) mentions a same-label address under another ending.
+    await db.opportunitySource.updateMany({ where: { opportunityId: w.opportunity.id }, data: { description: `${POST_TEXT}\nOr write to neha.rao@atzean-synthetic.co.uk` } });
+    apify({ "automation-lab/website-contact-finder": () => [{ ...WEBSITE_ITEMS[0], emails: ["neha.rao@atzean-synthetic.in"] }] });
+    await press(w, "people"); await press(w, "emails");
+    const domains = () => db.company.findUniqueOrThrow({ where: { id: w.company.id } }).then(c => (c.enrichment as { emailDomains: { domain: string; status: string }[] }).emailDomains);
+    expect(await domains()).toEqual(expect.arrayContaining([expect.objectContaining({ domain: "atzean-synthetic.in", status: "alias" }), expect.objectContaining({ domain: "atzean-synthetic.co.uk", status: "review" })]));
+    // Retained, not discarded, while it waits for review.
+    expect(await db.companyContactPoint.findFirstOrThrow({ where: { workspaceId: w.workspace.id, value: "neha.rao@atzean-synthetic.co.uk" } })).toMatchObject({ domainStatus: "review" });
+    // The company's own site later publishes an address there: the pending review is promoted.
+    apify({ "automation-lab/website-contact-finder": () => [{ ...WEBSITE_ITEMS[0], emails: ["sales.team@atzean-synthetic.co.uk"] }] });
+    await press(w, "emails", true);
+    expect((await domains()).find(d => d.domain === "atzean-synthetic.co.uk")).toMatchObject({ status: "alias" });
+  });
+
   it("refuses to check when nothing has been found, and says to find emails first", async () => {
     const w = await atzean(); apify();
     if (!isQueueConfigured()) return;
@@ -306,7 +322,7 @@ describe("Contact-provider fallback", () => {
     expect(s.counts).toMatchObject({ found: 1, signalhire_found: 1 });
     expect(s.reason).toContain("Apollo is not connected");
     // SignalHire used its synchronous mode with the LinkedIn URL, never a callback.
-    expect(calls.find(c => c.provider === "signalhire")?.body).toMatchObject({ withoutWaterfall: true });
+    expect(calls.find(c => c.provider === "signalhire" && c.url.endsWith("/candidate/search"))?.body).toMatchObject({ withoutWaterfall: true });
     expect(calls.some(c => c.provider === "signalhire" && JSON.stringify(c.body).includes("callbackUrl"))).toBe(false);
     // Arjun was found at SignalHire, so Hunter was never asked about him.
     expect(calls.filter(c => c.provider === "hunter" && c.url.includes("first_name=Arjun"))).toHaveLength(0);
@@ -327,9 +343,159 @@ describe("Contact-provider fallback", () => {
     const s = stage(run, "contacts");
     expect(s.counts).toMatchObject({ signalhire_failed: expect.any(Number), apollo_tried: expect.any(Number), found: 0 });
     expect(s.counts.lookups).toBeLessThanOrEqual(2);
-    expect(s.reason).toContain("quota or credits");
+    expect(s.reason).toContain("credits or quota used up");
     expect(await db.contactMethod.count({ where: { workspaceId: w.workspace.id, value: "hr@atzean-synthetic.example" } })).toBe(0);
     expect(await db.companyContactPoint.findFirstOrThrow({ where: { workspaceId: w.workspace.id, value: "hr@atzean-synthetic.example" } })).toMatchObject({ isGeneric: true });
+  });
+});
+
+describe("Stage-level fallback", () => {
+  type Answer = (url: URL, body?: Record<string, unknown>) => unknown;
+  /** Apify fakes (with overrides) plus provider answers routed by provider and path; records every provider call. */
+  function stack(answers: Partial<Record<"signalhire" | "hunter" | "apollo", Answer>>, over: Parameters<typeof apify>[0] = {}) {
+    const fake = apify(over); const calls: { provider: string; url: URL; body?: Record<string, unknown> }[] = [];
+    vi.mocked(providerJson).mockImplementation((async (ws: string, provider: string, url: string, headers?: Record<string, string>, body?: Record<string, unknown>) => {
+      if (provider in answers) { const u = new URL(url); calls.push({ provider, url: u, body }); const out = answers[provider as keyof typeof answers]!(u, body); if (out instanceof Error) throw out; return out; }
+      return fake.handler(ws, provider, url, headers, body);
+    }) as never);
+    return { fake, calls, paid: () => calls.filter(c => !/domain-finder|api_search|searchByQuery/.test(c.url.pathname)) };
+  }
+  async function enable(w: Awaited<ReturnType<typeof atzean>>, fallback: Record<string, unknown>, providers: ("signalhire" | "hunter" | "apollo")[]) {
+    await connectOpportunityProvider(w.ctx, "apify_enrichment", { config: { fallback: { enabled: true, ...fallback } }, allowedSearch: true, allowedStorage: true, allowedEnrichment: true });
+    for (const p of providers) await connectOpportunityProvider(w.ctx, p, { apiKey: `${p}-test-key`, config: {}, allowedSearch: true, allowedStorage: true, allowedEnrichment: true });
+  }
+  const noWebsiteEmails = { "automation-lab/website-contact-finder": () => [{ ...WEBSITE_ITEMS[0], emails: [] }] };
+  /** Hunter with nothing to say except what a test adds. */
+  const hunter = (extra: Answer = () => undefined): Answer => (u, b) => {
+    const out = extra(u, b); if (out !== undefined) return out;
+    if (u.pathname.endsWith("/domain-search")) return { data: { emails: [] } };
+    if (u.pathname.endsWith("/domain-finder")) return { data: [] };
+    if (u.pathname.endsWith("/email-finder")) return { data: { email: null } };
+    return new ProviderRequestError("404", "http", 404);
+  };
+
+  it("D03: Apify finds no email, Hunter finds one — the run completes with results and the address is on the person", async () => {
+    const w = await atzean();
+    await db.opportunitySource.updateMany({ where: { opportunityId: w.opportunity.id }, data: { description: "We are looking for IT staffing partners for contract Java developers in Pune." } });
+    stack({ hunter: hunter(u => (u.pathname.endsWith("/email-finder") && u.searchParams.get("first_name") === "Riya" ? { data: { email: "riya.s@atzean-synthetic.example", score: 91, verification: { status: "valid" } } } : undefined)) }, noWebsiteEmails);
+    await enable(w, { order: ["hunter"], maxLookupsPerRun: 5 }, ["hunter"]);
+    await press(w, "people");
+    const run = await press(w, "emails");
+    expect(stage(run, "emails").status).toBe("no_matches");
+    expect(stage(run, "contacts")).toMatchObject({ status: "done", counts: { found: 1, hunter_found: 1 } });
+    expect(run.state).toBe("COMPLETED");
+    expect(stage(run, "contacts").attempts).toEqual(expect.arrayContaining([expect.objectContaining({ provider: "hunter", operation: "emails", target: "Riya Synthetic", outcome: "found" })]));
+    const snap = await getOpportunityEnrichment(w.ctx, w.opportunity.id);
+    const riya = snap.people.find(p => p.name === "Riya Synthetic")!;
+    expect(riya.contacts).toEqual([expect.objectContaining({ value: "riya.s@atzean-synthetic.example", verificationResult: "UNCHECKED", provenance: expect.objectContaining({ identity: expect.objectContaining({ level: "supported", provider: "hunter" }) }) })]);
+    expect((run.result as { contactDecisions: { name: string; action: string }[] }).contactDecisions).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Riya Synthetic", action: "found" })]));
+  });
+
+  it("D04: a provider's person with a different LinkedIn profile, or a low-confidence match, is held for review and the next provider is still tried", async () => {
+    const w = await atzean();
+    stack({
+      apollo: (u, b) => (u.pathname.endsWith("/people/match") ? (b?.linkedin_url === "https://www.linkedin.com/in/arjun-synthetic"
+        ? { person: { id: "ap-other", first_name: "Arjun", name: "Arjun", linkedin_url: "https://www.linkedin.com/in/arjun-someone-else", email: "arjun.k@atzean-synthetic.example", email_status: "verified", organization: { name: "Atzean Technologies LLP" } }, match_confidence: "high" }
+        : { person: { id: "ap-low", first_name: "Riya", last_name: "Synthetic", name: "Riya Synthetic", email: "r.synthetic@atzean-synthetic.example", organization: { name: "Atzean Technologies LLP" } }, match_confidence: "low" }) : { people: [] }),
+      signalhire: (u, b) => (u.pathname.endsWith("/candidate/search") && (b?.items as string[])[0].includes("arjun") ? [{ item: "x", status: "success", candidate: { uid: "b".repeat(32), fullName: "Arjun", contacts: [{ type: "email", value: "arjun@atzean-synthetic.example", subType: "work" }] } }] : u.pathname.endsWith("/searchByQuery") ? { profiles: [] } : [{ item: "x", status: "failed" }]),
+    }, noWebsiteEmails);
+    await enable(w, { order: ["apollo", "signalhire"], maxLookupsPerRun: 10 }, ["apollo", "signalhire"]);
+    await press(w, "people");
+    const run = await press(w, "emails");
+    const arjun = await db.person.findFirstOrThrow({ where: { workspaceId: w.workspace.id, fullName: "Arjun" }, include: { contactMethods: true } });
+    // Apollo's Arjun is someone else: his address is not attached, but kept on the company naming Arjun as a possible owner.
+    expect(arjun.contactMethods.map(m => m.value)).toEqual(["arjun@atzean-synthetic.example"]);
+    const held = await db.companyContactPoint.findFirstOrThrow({ where: { workspaceId: w.workspace.id, value: "arjun.k@atzean-synthetic.example" } });
+    expect(held).toMatchObject({ possiblePersonId: arjun.id, evidence: expect.objectContaining({ review: expect.objectContaining({ identity: expect.objectContaining({ level: "conflict" }) }) }) });
+    // A low-confidence match with nothing else to go on is not attached either.
+    expect(await db.contactMethod.count({ where: { workspaceId: w.workspace.id, value: "r.synthetic@atzean-synthetic.example" } })).toBe(0);
+    expect(await db.companyContactPoint.findFirstOrThrow({ where: { workspaceId: w.workspace.id, value: "r.synthetic@atzean-synthetic.example" } })).toMatchObject({ evidence: expect.objectContaining({ review: expect.objectContaining({ identity: expect.objectContaining({ level: "weak" }) }) }) });
+    expect(stage(run, "contacts").counts).toMatchObject({ found: 1, review: expect.any(Number) });
+    const decisions = (run.result as { contactDecisions: { name: string; action: string }[] }).contactDecisions;
+    expect(decisions.find(d => d.name === "Arjun")).toMatchObject({ action: "found" });
+    expect(decisions.find(d => d.name === "Riya Synthetic")).toMatchObject({ action: "review" });
+    // A person settles it: another workspace cannot, attaching records who decided, and the decision is final.
+    const other = await atzean();
+    await expect(decideContactPoint(other.ctx, w.opportunity.id, { pointId: held.id, decision: "attach" })).rejects.toThrow();
+    await decideContactPoint(w.ctx, w.opportunity.id, { pointId: held.id, decision: "attach" });
+    expect(await db.contactMethod.findFirstOrThrow({ where: { workspaceId: w.workspace.id, personId: arjun.id, value: "arjun.k@atzean-synthetic.example" } })).toMatchObject({ provenance: expect.objectContaining({ ownership: expect.objectContaining({ basis: "confirmed_by_person", userId: w.user.id }) }) });
+    await expect(decideContactPoint(w.ctx, w.opportunity.id, { pointId: held.id, decision: "dismiss" })).rejects.toThrow(/already decided/);
+    expect((await getOpportunityEnrichment(w.ctx, w.opportunity.id)).contactPoints.some(p => p.id === held.id)).toBe(false);
+    expect(await db.auditLog.count({ where: { workspaceId: w.workspace.id, action: "company.contact_point_decided" } })).toBe(1);
+    expect(run.state).toBe("COMPLETED");
+  });
+
+  it("D05: a confirmed address is not searched again, an invalid one is replaced, a suppressed person is never searched — each with its reason", async () => {
+    const w = await atzean();
+    const { calls } = stack({ hunter: hunter(u => (u.pathname.endsWith("/email-finder") ? { data: { email: `${u.searchParams.get("first_name")!.toLowerCase()}.new@atzean-synthetic.example`, score: 80 } } : undefined)) }, noWebsiteEmails);
+    await enable(w, { order: ["hunter"], maxLookupsPerRun: 10 }, ["hunter"]);
+    await press(w, "people");
+    const riya = await db.person.findFirstOrThrow({ where: { workspaceId: w.workspace.id, fullName: "Riya Synthetic" } });
+    await db.contactMethod.create({ data: { workspaceId: w.workspace.id, personId: riya.id, kind: "WORK_EMAIL", value: "riya.old@atzean-synthetic.example", maskedValue: "r***@atzean-synthetic.example", source: "test", verificationResult: "INVALID", verifiedAt: new Date(), status: "FAILED" } });
+    const run = await press(w, "emails");
+    const decisions = (run.result as { contactDecisions: { name: string; action: string; reason: string }[] }).contactDecisions;
+    expect(decisions.find(d => d.name === "Riya Synthetic")).toMatchObject({ action: "found", reason: expect.stringMatching(/invalid|bounc/i) });
+    expect(await db.contactMethod.count({ where: { workspaceId: w.workspace.id, value: "riya.new@atzean-synthetic.example" } })).toBe(1);
+    // Now confirmed: a second run does not ask again.
+    await db.contactMethod.updateMany({ where: { workspaceId: w.workspace.id, value: "riya.new@atzean-synthetic.example" }, data: { verificationResult: "MAILBOX_CONFIRMED", verifiedAt: new Date(), status: "VERIFIED" } });
+    await db.suppression.create({ data: { workspaceId: w.workspace.id, kind: "LINKEDIN", value: "https://www.linkedin.com/in/arjun-synthetic", reason: "Asked not to be contacted", source: "test" } });
+    const before = calls.length;
+    const again = await press(w, "emails", true);
+    const d2 = (again.result as { contactDecisions: { name: string; action: string; reason: string }[] }).contactDecisions;
+    expect(d2.find(d => d.name === "Riya Synthetic")).toMatchObject({ action: "skip" });
+    expect(calls.slice(before).some(c => c.url.searchParams.get("first_name") === "Riya")).toBe(false);
+    expect(d2.find(d => d.name === "Arjun")).toMatchObject({ action: "blocked" });
+  });
+
+  it("D01: Apify finds no company; Hunter's name match is offered for a person to choose, never auto-accepted, and the choice is final", async () => {
+    const w = await atzean();
+    await db.opportunitySource.updateMany({ where: { opportunityId: w.opportunity.id }, data: { description: "We need IT staffing partners for contract Java developers in Pune." } });
+    stack({ hunter: hunter(u => (u.pathname.endsWith("/domain-finder") ? { data: [{ domain: "atzean-synthetic.example", company_name: "Atzean Technologies" }, { domain: "unrelated-synthetic.example", company_name: "Blue Harbour Foods" }] } : undefined)) },
+      { "apify/google-search-scraper": () => [{ organicResults: [] }], "harvestapi/linkedin-company": () => [] });
+    await enable(w, { order: ["signalhire", "hunter"] }, ["hunter"]);
+    const run = await press(w, "research");
+    expect(run.state).toBe("NEEDS_SELECTION");
+    expect(stage(run, "resolve")).toMatchObject({ status: "needs_selection", reason: expect.stringContaining("A name alone is not proof") });
+    // SignalHire cannot look a company up, and says so; a differently named company is not offered.
+    expect(stage(run, "resolve").attempts).toEqual(expect.arrayContaining([expect.objectContaining({ provider: "signalhire", outcome: "unsupported" }), expect.objectContaining({ provider: "hunter", call: "Domain Finder", outcome: "found" })]));
+    expect((run.result as { fallbackCandidates: { domain: string }[] }).fallbackCandidates.map(c => c.domain)).toEqual(["atzean-synthetic.example"]);
+    expect((await db.company.findUniqueOrThrow({ where: { id: w.company.id } })).domain).toBeNull();
+    if (!isQueueConfigured()) return;
+    await selectEnrichmentCompany(w.ctx, run.id, { fallbackIndex: 0 });
+    const c = await db.company.findUniqueOrThrow({ where: { id: w.company.id } });
+    expect(c.domain).toBe("atzean-synthetic.example");
+    expect((c.enrichment as { fields: { domain: { confirmedBy: string } } }).fields.domain.confirmedBy).toBe(w.user.id);
+  });
+
+  it("D01: a name match the opportunity's own source also names is accepted, and the details stage fills only missing fields", async () => {
+    const w = await atzean();
+    await db.opportunitySource.updateMany({ where: { opportunityId: w.opportunity.id }, data: { description: "We need IT staffing partners. See https://atzean-synthetic.example/careers" } });
+    const { calls } = stack({ hunter: hunter(u => (u.pathname.endsWith("/domain-finder") ? { data: [{ domain: "atzean-synthetic.example", company_name: "Atzean Technologies LLP" }] }
+      : u.pathname.endsWith("/companies/find") ? { data: { name: "Atzean Technologies LLP", category: { industry: "IT Services" }, geo: { city: "Pune", country: "India" }, metrics: { employeesCount: 40 } } } : undefined)) },
+      { "apify/google-search-scraper": () => [{ organicResults: [] }], "harvestapi/linkedin-company": () => [] });
+    await enable(w, { order: ["hunter"] }, ["hunter"]);
+    const run = await press(w, "research");
+    expect(stage(run, "resolve")).toMatchObject({ status: "done", reason: expect.stringContaining("also mentions") });
+    const c = await db.company.findUniqueOrThrow({ where: { id: w.company.id } });
+    expect(c).toMatchObject({ domain: "atzean-synthetic.example", industry: "IT Services", city: "Pune", employeeCount: 40 });
+    expect(calls.filter(x => x.url.pathname.endsWith("/companies/find"))).toHaveLength(1);
+    expect(["COMPLETED", "PARTIAL"]).toContain(run.state);
+  });
+
+  it("stops at the paid-lookup cap, records every attempt in the ledger, and does not bypass a disabled operation", async () => {
+    const w = await atzean();
+    const { paid } = stack({ hunter: hunter(u => (u.pathname.endsWith("/email-finder") ? { data: { email: null } } : undefined)) }, noWebsiteEmails);
+    await enable(w, { order: ["hunter"], maxLookupsPerRun: 1 }, ["hunter"]);
+    await press(w, "people");
+    const run = await press(w, "emails");
+    expect(stage(run, "contacts").attempts).toEqual(expect.arrayContaining([expect.objectContaining({ outcome: "budget" })]));
+    const rows = await db.providerCall.findMany({ where: { workspaceId: w.workspace.id, enrichmentRunId: run.id, units: { gt: 0 } } });
+    expect(rows).toHaveLength(1);
+    const before = paid().length;
+    await enable(w, { order: ["hunter"], maxLookupsPerRun: 5, operations: { company: true, people: true, emails: false, verify: true } }, []);
+    const off = await press(w, "emails", true);
+    expect(stage(off, "contacts")).toMatchObject({ status: "skipped", reason: expect.stringContaining("switched off for finding emails") });
+    expect(paid().length).toBe(before);
   });
 });
 

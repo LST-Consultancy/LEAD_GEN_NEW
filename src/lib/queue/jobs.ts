@@ -17,6 +17,8 @@ export const JOB = {
   MAILBOX_SYNC: "mail.sync_mailboxes",
   /** Emails the notifications people asked to receive by email. */
   NOTIFICATION_EMAILS: "notifications.email",
+  /** Pushes the notifications people asked to receive in their browser. */
+  NOTIFICATION_PUSHES: "notifications.push",
   OPPORTUNITY_ENRICHMENT: "opportunity.enrichment",
   /** Re-runs the scoring engine over a workspace's leads. */
   RESCORE_WORKSPACE: "rescore.workspace",
@@ -66,6 +68,7 @@ export type JobPayloads = {
   [JOB.OPPORTUNITY_WATCHES]: { workspaceId: string };
   [JOB.MAILBOX_SYNC]: { workspaceId: string };
   [JOB.NOTIFICATION_EMAILS]: { workspaceId: string };
+  [JOB.NOTIFICATION_PUSHES]: { workspaceId: string };
   [JOB.OPPORTUNITY_ENRICHMENT]: { workspaceId: string; runId: string };
   [JOB.RESCORE_WORKSPACE]: { workspaceId: string; reason?: string };
   [JOB.RESCORE_LEAD]: { workspaceId: string; leadId: string; reason?: string };
@@ -98,6 +101,7 @@ export const JOB_POLICY: Record<
   [JOB.OPPORTUNITY_WATCHES]: { attempts: 3, backoffMs: 10000, timeoutMs: 120000 },
   [JOB.MAILBOX_SYNC]: { attempts: 2, backoffMs: 30000, timeoutMs: 240000 },
   [JOB.NOTIFICATION_EMAILS]: { attempts: 2, backoffMs: 30000, timeoutMs: 240000 },
+  [JOB.NOTIFICATION_PUSHES]: { attempts: 2, backoffMs: 15000, timeoutMs: 120000 },
   // A redelivery resumes at the first unfinished stage and re-reads recorded Apify runs, so retrying is not re-buying.
   [JOB.OPPORTUNITY_ENRICHMENT]: { attempts: 2, backoffMs: 15000, timeoutMs: 1500000 },
   [JOB.RESCORE_WORKSPACE]: { attempts: 3, backoffMs: 5_000, timeoutMs: 300_000 },
@@ -130,6 +134,7 @@ export const JOB_POLICY: Record<
  */
 export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: string }>> = {
   [JOB.OPPORTUNITY_WATCHES]: { cron: "15 * * * *", describe: "Hourly — enqueue due saved opportunity searches without overlapping cadence windows." },
+  [JOB.NOTIFICATION_PUSHES]: { cron: "* * * * *", describe: "Every minute — a push is only worth having if it arrives while the thing is still happening, and each run is one claim query plus one tiny request per subscribed browser, with nothing sent when nobody asked for push." },
   [JOB.NOTIFICATION_EMAILS]: { cron: "*/5 * * * *", describe: "Every five minutes — a hot lead or an approval waiting is worth knowing about within minutes, and batching per run keeps it to one mail-server connection per workspace rather than one per event." },
   [JOB.MAILBOX_SYNC]: { cron: "*/5 * * * *", describe: "Every five minutes — a reply should stop the next sequence step, and steps are spaced in days, so five minutes stops it well before it sends while keeping IMAP logins to a mail server's normal polling rate." },
   [JOB.DETECT_DEAL_RISKS]: {
@@ -213,6 +218,7 @@ export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: fals
     [JOB.OPPORTUNITY_WATCHES]: { allowed: true },
     [JOB.MAILBOX_SYNC]: { allowed: true },
     [JOB.NOTIFICATION_EMAILS]: { allowed: true },
+    [JOB.NOTIFICATION_PUSHES]: { allowed: true },
     [JOB.OPPORTUNITY_ENRICHMENT]: { allowed: false, because: "Started from an opportunity's Research, Find people, Find emails, Check emails or Enrich buttons." },
     [JOB.RESCORE_WORKSPACE]: { allowed: true },
     [JOB.DETECT_DEAL_RISKS]: { allowed: true },
@@ -257,6 +263,7 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.OPPORTUNITY_WATCHES]: "Refresh opportunity watches",
   [JOB.MAILBOX_SYNC]: "Read replies from connected mailboxes",
   [JOB.NOTIFICATION_EMAILS]: "Email notifications",
+  [JOB.NOTIFICATION_PUSHES]: "Push notifications",
   [JOB.OPPORTUNITY_ENRICHMENT]: "Enrich an opportunity",
   [JOB.RESCORE_WORKSPACE]: "Rescore all leads",
   [JOB.RESCORE_LEAD]: "Rescore one lead",

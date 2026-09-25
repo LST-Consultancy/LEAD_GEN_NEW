@@ -1,4 +1,5 @@
 import "server-only";
+import { sendingReady } from "./mailbox-sending";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
@@ -7,7 +8,6 @@ import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate } from "@/lib/services/mutate";
 import { TOOLS, type RiskClass } from "@/lib/ai/tools";
 import { isConfigured as isAiConfigured, NOT_CONFIGURED_MESSAGE } from "@/lib/ai/provider";
-import { isEmailConfigured } from "@/lib/outreach/provider";
 import {
   evaluate,
   describePolicy,
@@ -474,6 +474,7 @@ export async function dryRunAgent(ctx: AuthContext, agentId: string, limit = 12)
 
   const usedToday = { points: 0, actions: 0, emails: 0, whatsapp: 0, linkedin: 0, leads: 0, reveals: 0 };
 
+  const providerReady = await sendingReady(ctx.workspaceId);
   const rows = leads.map((lead) => {
     const action: ProposedAction = {
       tool: chosen?.name ?? "unknown",
@@ -499,7 +500,7 @@ export async function dryRunAgent(ctx: AuthContext, agentId: string, limit = 12)
       action,
       usedToday,
       tool: chosen ? { known: chosen.known, implemented: chosen.implemented } : null,
-      providerReady: isEmailConfigured(),
+      providerReady,
       localWeekday: weekday,
       localHour: hour,
     });

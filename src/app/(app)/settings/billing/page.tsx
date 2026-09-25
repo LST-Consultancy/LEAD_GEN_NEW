@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { AlertTriangle, Check, CreditCard, Zap } from "lucide-react";
 import { requireAuth } from "@/lib/auth/context";
 import { getBillingSettings } from "@/lib/services/settings";
+import { billingProviderStatus, listCheckouts } from "@/lib/services/billing";
+import { PayButton } from "@/components/billing/pay-button";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -26,8 +29,10 @@ const TXN_LABEL: Record<string, string> = {
 
 export default async function BillingPage() {
   const ctx = await requireAuth();
-  const { subscription, ledger, projection, todaySpend, spendByType, plans } =
-    await getBillingSettings(ctx);
+  const [{ subscription, ledger, projection, todaySpend, spendByType, plans }, checkouts] = await Promise.all([getBillingSettings(ctx), listCheckouts(ctx)]);
+  const payments = billingProviderStatus();
+  const canPay = ctx.permissions.includes(PERMISSIONS.BILLING_MANAGE);
+  const payWhy = !canPay ? "Only billing managers can pay for a plan." : !payments.configured || !payments.webhookConfigured ? "Paying online needs Razorpay set up on this server (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET). Nothing can be charged until then." : null;
 
   const allowance = subscription?.plan.pointsMonthly ?? 0;
   const pct = allowance > 0 ? Math.min(100, (projection.balance / allowance) * 100) : 0;
@@ -213,6 +218,7 @@ export default async function BillingPage() {
                     <span className="text-2xs font-normal text-muted">/mo</span>
                   </p>
                   <p className="mt-0.5 text-2xs leading-relaxed text-secondary">{p.description}</p>
+                  {!p.isCurrent || subscription.status !== "active" ? <PayButton planKey={p.key} planName={p.name} hasYearly={p.priceYearly !== null && Number(p.priceYearly) > 0} testMode={payments.testMode} disabled={Boolean(payWhy)} why={payWhy} /> : null}
                   <ul className="mt-2 space-y-0.5 border-t border-border-subtle pt-2">
                     <PlanLine label={`${formatNumber(p.pointsMonthly)} points a month`} />
                     <PlanLine
@@ -231,10 +237,28 @@ export default async function BillingPage() {
           </CardContent>
           <CardFooter>
             <p className="text-2xs text-muted">
-              Plans are database rows, not hardcoded prices. Payment collection, GST invoicing and
-              plan changes land in Phase 10.
+              Plans are database rows, not hardcoded prices. Paying charges exactly the listed price
+              through Razorpay{payments.testMode ? " — test mode, so no real money moves" : ""}; tax is
+              not calculated here and no GST invoice is generated, so check your tax treatment with
+              your accountant. The plan changes only when Razorpay&apos;s signed confirmation arrives.
             </p>
           </CardFooter>
+        </Card>
+      ) : null}
+
+      {checkouts.length > 0 ? (
+        <Card>
+          <CardHeader><CardTitle>Payments</CardTitle></CardHeader>
+          <CardContent className="pt-0">
+            <ul className="divide-y divide-border text-xs">
+              {checkouts.map((c) => (
+                <li key={c.id} className="flex min-w-0 flex-wrap items-center gap-2 py-1.5">
+                  <span className="min-w-0 flex-1 break-words">{c.planName} · {c.period} · <span className="tabular">{formatInr(c.amountPaise / 100)}</span> {c.currency !== "INR" ? c.currency : ""}{c.testMode ? " · test mode" : ""}<span className="block text-2xs text-muted">{formatDateTime(c.createdAt)}{c.paidAt ? ` · paid ${formatDateTime(c.paidAt)}` : ""}{c.paymentRef ? ` · ${c.paymentRef}` : ""}{c.note ? ` · ${c.note}` : ""}</span></span>
+                  <Badge variant={c.status === "PAID" ? "success" : c.status === "MISMATCH" ? "danger" : c.status === "CREATED" ? "info" : "neutral"} size="sm">{c.status === "CREATED" ? "Awaiting payment" : c.status === "PAID" ? "Paid" : c.status === "MISMATCH" ? "Amount mismatch" : c.status === "EXPIRED" ? "Expired" : "Cancelled"}</Badge>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
         </Card>
       ) : null}
 

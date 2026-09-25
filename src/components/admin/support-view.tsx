@@ -85,7 +85,7 @@ export function SupportView({
         <CardContent className="space-y-2 pt-0 text-2xs leading-relaxed text-secondary">
           <Answer
             q="Why did my sequence not send anything?"
-            a="Email sends only once a mailbox is connected through SMTP or Resend — check System status above. WhatsApp and LinkedIn have no sending adapter, so those steps are held. Open the sequence: every enrollment shows whether it is waiting on the clock, held on configuration, or stopped because that person cannot be contacted."
+            a="Email sends only once a sending mailbox is connected in Settings → Email Accounts (SMTP, Google or Microsoft 365), or the server relay is configured — check System status above. WhatsApp and LinkedIn sequence steps are manual tasks: WhatsApp messages are sent one at a time from the lead through the Business Cloud API, and LinkedIn has no automated sending. Open the sequence: every enrollment shows whether it is waiting on the clock, held on configuration, or stopped because that person cannot be contacted."
             href="/outreach"
             hrefLabel="Open Outreach"
           />

@@ -25,6 +25,7 @@ export function NotificationsSettingsView({
   totalUnread,
   emailAvailable,
   emailAddress,
+  push = { configured: false, publicKey: null, devices: 0 },
 }: {
   kinds: NotificationKindStat[];
   windowDays: number;
@@ -32,6 +33,7 @@ export function NotificationsSettingsView({
   totalUnread: number;
   emailAvailable: boolean;
   emailAddress: string;
+  push?: { configured: boolean; publicKey: string | null; devices: number };
 }) {
   const noisiest = kinds[0];
 
@@ -45,6 +47,8 @@ export function NotificationsSettingsView({
         </p>
       </div>
 
+
+      <PushDevice push={push} />
 
       <Card>
         <CardHeader className="flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -87,6 +91,7 @@ export function NotificationsSettingsView({
                   <th className="pb-1.5 text-right font-semibold">Last</th>
                   <th className="pb-1.5 text-right font-semibold">In app</th>
                   <th className="pb-1.5 text-right font-semibold">Email</th>
+                  <th className="pb-1.5 text-right font-semibold">Push</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,6 +143,9 @@ export function NotificationsSettingsView({
                     <td className="py-1.5 text-right">
                       <EmailSwitch kind={k.kind} label={k.label} on={k.email} available={emailAvailable} />
                     </td>
+                    <td className="py-1.5 text-right">
+                      <ChannelSwitch channel="push" kind={k.kind} label={k.label} on={k.push} available={push.configured && push.devices > 0} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -153,7 +161,11 @@ export function NotificationsSettingsView({
         {emailAvailable
           ? `Kinds with Email on are also sent to ${emailAddress} within about five minutes; one older than a day is not sent late.`
           : "Email delivery needs a working mail provider on the server (SMTP_URL and EMAIL_FROM); until then these arrive in the app only."}{" "}
-        Push notifications are not built.
+        {push.configured
+          ? push.devices > 0
+            ? `Kinds with Push on wake ${push.devices === 1 ? "your subscribed browser" : `your ${push.devices} subscribed browsers`} within about a minute; the text is fetched from here, never sent through the push service.`
+            : "Turn on push for this browser above, then choose kinds under Push."
+          : "Push needs VAPID keys on the server (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT); until then nothing is pushed."}
       </p>
     </div>
   );
@@ -193,4 +205,67 @@ function EmailSwitch({ kind, label, on: initial, available }: { kind: string; la
     } finally { setPending(false); }
   }
   return <Switch aria-label={`Email ${label} notifications`} checked={on} disabled={pending || (!available && !on)} onCheckedChange={(c) => void toggle(c)} />;
+}
+
+function ChannelSwitch({ channel, kind, label, on: initial, available }: { channel: "push"; kind: string; label: string; on: boolean; available: boolean }) {
+  const router = useRouter();
+  const [on, setOn] = React.useState(initial);
+  const [pending, setPending] = React.useState(false);
+  async function toggle(next: boolean) {
+    setOn(next); setPending(true);
+    try {
+      await api.put("/api/notification-preferences", { kind, [channel]: next });
+      toast.success(next ? `${label} will be pushed` : `${label} no longer pushed`);
+      router.refresh();
+    } catch (err) {
+      setOn(!next);
+      toast.error("Not saved", { description: `${err instanceof ApiError ? err.message : "The server didn't save it."} Put back as it was.` });
+    } finally { setPending(false); }
+  }
+  return <Switch aria-label={`Push ${label} notifications`} checked={on} disabled={pending || (!available && !on)} onCheckedChange={(c) => void toggle(c)} />;
+}
+
+/** Subscribes or unsubscribes this browser. The browser asks the person first; nothing happens without their yes. */
+function PushDevice({ push }: { push: { configured: boolean; publicKey: string | null; devices: number } }) {
+  const router = useRouter();
+  const [state, setState] = React.useState<"unknown" | "unsupported" | "denied" | "off" | "on">("unknown");
+  const [pending, setPending] = React.useState(false);
+  React.useEffect(() => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) { setState("unsupported"); return; }
+    if (Notification.permission === "denied") { setState("denied"); return; }
+    navigator.serviceWorker.getRegistration("/push-sw.js").then(r => r?.pushManager.getSubscription()).then(s => setState(s ? "on" : "off")).catch(() => setState("off"));
+  }, []);
+  const key = (b64: string) => { const p = b64.replace(/-/g, "+").replace(/_/g, "/"); const raw = atob(p + "=".repeat((4 - (p.length % 4)) % 4)); return Uint8Array.from(raw, c => c.charCodeAt(0)); };
+  async function enable() {
+    if (!push.publicKey) return;
+    setPending(true);
+    try {
+      if ((await Notification.requestPermission()) !== "granted") { setState("denied"); toast.error("Notifications were not allowed", { description: "Nothing was subscribed. Allow notifications for this site in the browser to turn push on." }); return; }
+      const reg = await navigator.serviceWorker.register("/push-sw.js");
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(push.publicKey) });
+      await api.post("/api/push/subscription", { ...sub.toJSON(), userAgent: navigator.userAgent.slice(0, 300) });
+      setState("on"); toast.success("Push is on for this browser"); router.refresh();
+    } catch (err) {
+      toast.error("Push was not turned on", { description: err instanceof ApiError ? err.message : "The browser refused the subscription. Nothing was saved." });
+    } finally { setPending(false); }
+  }
+  async function disable() {
+    setPending(true);
+    try {
+      const reg = await navigator.serviceWorker.getRegistration("/push-sw.js");
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) { await api.del("/api/push/subscription", { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+      setState("off"); toast.success("Push is off for this browser"); router.refresh();
+    } catch (err) {
+      toast.error("Not changed", { description: err instanceof ApiError ? err.message : "Push could not be turned off here." });
+    } finally { setPending(false); }
+  }
+  return <Card>
+    <CardContent className="flex flex-wrap items-center gap-2 py-3 text-xs">
+      <span className="min-w-0 flex-1"><span className="font-medium text-primary">Push on this browser</span>
+        <span className="block text-2xs text-secondary">{!push.configured ? "Not available: this server has no VAPID keys configured." : state === "unsupported" ? "This browser does not support web push (on iPhone, add Signalroom to the Home Screen first)." : state === "denied" ? "Notifications are blocked for this site in the browser's settings." : state === "on" ? `Subscribed. ${push.devices} ${push.devices === 1 ? "browser" : "browsers"} in total for you.` : "Not subscribed. The browser will ask before anything is turned on."}</span></span>
+      {push.configured && state === "off" && <button type="button" disabled={pending} onClick={() => void enable()} className="rounded-md border border-border px-2.5 py-1 font-medium text-primary hover:bg-surface-hover disabled:opacity-50">Turn on push</button>}
+      {push.configured && state === "on" && <button type="button" disabled={pending} onClick={() => void disable()} className="rounded-md border border-border px-2.5 py-1 text-secondary hover:bg-surface-hover disabled:opacity-50">Turn off</button>}
+    </CardContent>
+  </Card>;
 }

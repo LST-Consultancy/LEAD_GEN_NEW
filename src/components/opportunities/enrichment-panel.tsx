@@ -8,12 +8,17 @@ import { Badge } from "@/components/ui/badge";
 import { RUN_STATE_LABEL, STAGE_LABEL, TERMINAL, type RunKind, type RunState, type Stage } from "@/lib/enrichment/stages";
 import { CHECK_LABEL } from "@/lib/enrichment/verification";
 import { FALLBACK_LABEL, FALLBACK_PROVIDERS } from "@/lib/enrichment/fallback";
+import { OUTCOME_LABEL, type Outcome } from "@/lib/enrichment/provider-outcome";
+import { OPERATION_LABEL, type Operation } from "@/lib/enrichment/capabilities";
 import { money } from "@/lib/enrichment/config";
 import type { getEnrichmentRun, getOpportunityEnrichment } from "@/lib/services/enrichment";
 
 type Snapshot = Awaited<ReturnType<typeof getOpportunityEnrichment>>;
 type RunView = Awaited<ReturnType<typeof getEnrichmentRun>>;
 type Person = Snapshot["people"][number];
+type FallbackCandidate = { name: string; domain: string | null; linkedinUrl: string | null; source: string };
+type Decision = { personId: string; name: string; action: "search" | "skip" | "recheck" | "blocked" | "review" | "found" | "none"; reason: string };
+type PeopleReview = { name: string; provider: string; reason: string };
 type Candidate = { profile: { name: string; linkedinUrl: string; domain: string | null; city: string | null; country: string | null; industry: string | null; employeeCount: number | null; description: string | null }; score: number; reasons: string[]; conflicts: string[] };
 
 const ACTIONS: { kind: RunKind; label: string; hint: string }[] = [
@@ -35,6 +40,7 @@ function stageCounts(s: Stage): string | null {
     case "emails": return c.personal !== undefined ? `${n(c.personal)} personal${n(c.inferred) ? ` · ${n(c.inferred)} inferred from a name` : ""} · ${n(c.generic)} company-wide · ${n(c.unassigned)} unassigned${n(c.review) ? ` · ${n(c.review)} on a domain to review` : ""}${n(c.phones) ? ` · ${n(c.phones)} ${n(c.phones) === 1 ? "phone" : "phones"}` : ""}${n(c.alreadyKnown) ? ` · ${n(c.alreadyKnown)} already known` : ""}${n(c.setAside) ? ` · ${n(c.setAside)} set aside` : ""}` : null;
     case "contacts": {
       if (c.lookups === undefined) return null;
+      if (c.searched !== undefined) return `${n(c.searched)} ${n(c.searched) === 1 ? "person" : "people"} searched · ${n(c.found)} found${n(c.review) ? ` · ${n(c.review)} held for review` : ""} · ${n(c.lookups)} provider ${n(c.lookups) === 1 ? "call" : "calls"}${n(c.skippedHasAddress) ? ` · ${n(c.skippedHasAddress)} already had an address` : ""}${n(c.recheck) ? ` · ${n(c.recheck)} due a recheck` : ""}${n(c.blocked) ? ` · ${n(c.blocked)} suppressed` : ""}${n(c.alreadyTried) ? ` · ${n(c.alreadyTried)} asked recently, not repeated` : ""}`;
       const per = FALLBACK_PROVIDERS.filter(p => n(c[`${p}_tried`]) || n(c[`${p}_skipped`]) || n(c[`${p}_failed`])).map(p => `${FALLBACK_LABEL[p]} ${n(c[`${p}_found`])}/${n(c[`${p}_tried`])} found${n(c[`${p}_skipped`]) ? `, ${n(c[`${p}_skipped`])} skipped` : ""}${n(c[`${p}_failed`]) ? `, ${n(c[`${p}_failed`])} failed` : ""}`);
       return `${n(c.lookups)} ${n(c.lookups) === 1 ? "lookup" : "lookups"} for ${n(c.considered)} ${n(c.considered) === 1 ? "person" : "people"} · ${n(c.found)} found${per.length ? ` · ${per.join(" · ")}` : ""}${n(c.alreadyTried) ? ` · ${n(c.alreadyTried)} tried recently, not repeated` : ""}`;
     }
@@ -45,6 +51,25 @@ function stageCounts(s: Stage): string | null {
     default: return null;
   }
 }
+/** What the other providers added to a stage Apify ran first. */
+function fallbackCounts(s: Stage): string | null {
+  const c = s.counts ?? {};
+  const parts = [c.fallbackResolved ? "identified through another provider" : null, c.fallbackCandidates ? `${n(c.fallbackCandidates)} name ${n(c.fallbackCandidates) === 1 ? "match" : "matches"} to choose from` : null,
+    c.fallbackFieldsFilled !== undefined ? `${n(c.fallbackFieldsFilled)} missing ${n(c.fallbackFieldsFilled) === 1 ? "field" : "fields"} filled by other providers` : null,
+    c.fallbackSaved !== undefined ? `${n(c.fallbackSaved)} found by other providers${n(c.fallbackReview) ? `, ${n(c.fallbackReview)} held for review` : ""}` : null,
+    c.fallbackChecked !== undefined ? `${n(c.fallbackChecked)} checked by Hunter` : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+const ATTEMPT_VARIANT = (o: string) => (o === "found" ? "success" : o === "review" ? "warning" : ["invalid_credentials", "not_entitled", "quota", "malformed"].includes(o) ? "danger" : "neutral") as "success" | "warning" | "danger" | "neutral";
+/** Every provider asked (or not asked) in a stage, and what it answered. */
+function Attempts({ s }: { s: Stage }) {
+  const list = s.attempts ?? [];
+  if (!list.length) return null;
+  return <details className="mt-1 text-xs"><summary className="cursor-pointer text-secondary">Providers for this step ({list.length})</summary>
+    <ul className="mt-1 space-y-1">{list.map((a, i) => <li key={`${a.at}-${i}`} className="min-w-0 break-words"><Badge size="sm" variant={ATTEMPT_VARIANT(a.outcome)}>{OUTCOME_LABEL[a.outcome as Outcome] ?? a.outcome}</Badge> <span className="font-medium">{FALLBACK_LABEL[a.provider as keyof typeof FALLBACK_LABEL] ?? a.provider}</span>{a.call !== "—" ? ` · ${a.call}` : ""}{a.target !== "—" ? ` · ${a.target}` : ""} <span className="block text-secondary">{OPERATION_LABEL[a.operation as Operation] ?? a.operation}: {a.detail}</span></li>)}</ul>
+  </details>;
+}
+const DECISION_LABEL: Record<Decision["action"], string> = { found: "Address found", review: "Held for review", none: "Nothing found", skip: "Not searched", recheck: "Due a recheck", blocked: "Suppressed", search: "Searched" };
 const stageText = (s: Stage) => ({ pending: "Waiting", running: STAGE_LABEL[s.key].running, done: STAGE_LABEL[s.key].done, no_matches: "No matches", skipped: "Skipped", needs_selection: "Needs your choice", blocked: "Not run", failed: "Failed", cancelled: "Cancelled" })[s.status];
 const stageVariant = (s: Stage) => (s.status === "done" ? "success" : s.status === "failed" ? "danger" : s.status === "needs_selection" ? "warning" : s.status === "running" ? "info" : "neutral") as "success" | "danger" | "warning" | "info" | "neutral";
 
@@ -95,6 +120,14 @@ export function EnrichmentPanel({ opportunityId, opportunityTitle = "", initial,
       await reload();
     } catch (e) { setMessage(e instanceof Error ? e.message : "Could not record that."); } finally { setBusy(false); }
   }
+  async function decidePoint(pointId: string, decision: "attach" | "dismiss", who: string | null) {
+    setBusy(true); setMessage("");
+    try {
+      await api.post(`/api/opportunities/${opportunityId}/contact-points`, { pointId, decision });
+      setMessage(decision === "attach" ? `The address is now ${who ?? "this person"}'s, recorded as confirmed by you. It has not been checked for delivery.` : "The address stays on the company with no owner.");
+      await reload();
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Could not record that."); } finally { setBusy(false); }
+  }
   async function toCrm() {
     setBusy(true); setMessage("");
     try { const r = await api.post<{ leadId: string; note: string | null }>(`/api/opportunities/${opportunityId}/crm`, { personId }); router.push(`/leads/${r.leadId}`); }
@@ -102,7 +135,8 @@ export function EnrichmentPanel({ opportunityId, opportunityTitle = "", initial,
   }
 
   const stages = (run?.stages ?? []) as Stage[];
-  const candidates = ((run?.result ?? {}) as { candidates?: Candidate[] }).candidates ?? [];
+  const runResult = (run?.result ?? {}) as { candidates?: Candidate[]; fallbackCandidates?: FallbackCandidate[]; contactDecisions?: Decision[]; peopleReview?: PeopleReview[] };
+  const candidates = runResult.candidates ?? [];
   const allowed = (k: RunKind) => (k === "research" ? canResearch : canReveal);
   const est = snap.estimates as unknown as Record<RunKind, { total: number; budget: number; note: string }>;
 
@@ -117,9 +151,10 @@ export function EnrichmentPanel({ opportunityId, opportunityTitle = "", initial,
       <p className="text-xs text-secondary">Enrich runs company research, people, email discovery and email checks in order, skipping steps done in the last {snap.limits.freshDays} days. At most {money(est.enrich.total)} per run (budget {money(est.enrich.budget)}). {est.enrich.note} Nothing here sends any message.</p>
       {offerFind && <Button variant="outline" size="sm" disabled={busy || active} onClick={() => start("emails")}>Find emails now</Button>}
       {message && <p role="status" className="text-sm">{message}</p>}
-      {run && <RunStatus run={run} stages={stages} candidates={candidates} busy={busy} onCancel={() => control("cancel")} onRetry={() => control("retry")} onSelect={i => control("select", { index: i })} onNone={() => control("select", { none: true })} canChoose={canResearch} />}
+      {run && <RunStatus run={run} stages={stages} candidates={candidates} fallbackCandidates={runResult.fallbackCandidates ?? []} busy={busy} onCancel={() => control("cancel")} onRetry={() => control("retry")} onSelect={i => control("select", { index: i })} onSelectFallback={i => control("select", { fallbackIndex: i })} onNone={() => control("select", { none: true })} canChoose={canResearch} />}
+      {run && <Decisions decisions={runResult.contactDecisions ?? []} review={runResult.peopleReview ?? []} />}
     </section>
-    <CompanyCard company={snap.company} contactPoints={snap.contactPoints} people={snap.people} canDecide={canResearch} busy={busy} onDecide={decideDomain} />
+    <CompanyCard company={snap.company} contactPoints={snap.contactPoints} people={snap.people} canDecide={canResearch} busy={busy} onDecide={decideDomain} onDecidePoint={decidePoint} />
     <SourceContacts contacts={((run?.result ?? {}) as { sourceContacts?: SourceContact[] }).sourceContacts ?? []} />
     <section className="space-y-3 rounded-xl border border-border p-4">
       <h2 className="font-semibold">People at this company <span className="tabular-nums text-secondary">({current.length})</span></h2>
@@ -139,7 +174,7 @@ export function EnrichmentPanel({ opportunityId, opportunityTitle = "", initial,
   </div>;
 }
 
-function RunStatus({ run, stages, candidates, busy, onCancel, onRetry, onSelect, onNone, canChoose }: { run: RunView; stages: Stage[]; candidates: Candidate[]; busy: boolean; onCancel: () => void; onRetry: () => void; onSelect: (i: number) => void; onNone: () => void; canChoose: boolean }) {
+function RunStatus({ run, stages, candidates, fallbackCandidates, busy, onCancel, onRetry, onSelect, onSelectFallback, onNone, canChoose }: { run: RunView; stages: Stage[]; candidates: Candidate[]; fallbackCandidates: FallbackCandidate[]; busy: boolean; onCancel: () => void; onRetry: () => void; onSelect: (i: number) => void; onSelectFallback: (i: number) => void; onNone: () => void; canChoose: boolean }) {
   const state = RUN_STATE_LABEL[run.state as RunState] ?? { label: run.state, variant: "neutral" as const };
   const active = !TERMINAL.includes(run.state as RunState);
   const reported = (run.apifyRuns ?? []).reduce((a, r) => a + (r.usageUsd ?? 0), 0);
@@ -149,7 +184,7 @@ function RunStatus({ run, stages, candidates, busy, onCancel, onRetry, onSelect,
       {["PARTIAL", "FAILED", "CANCELLED"].includes(run.state) && stages.some(s => ["failed", "cancelled"].includes(s.status)) && <Button size="sm" variant="outline" disabled={busy} onClick={onRetry}>Retry failed steps</Button>}
     </div>
     {run.notice && <p className="rounded border border-warning-border bg-warning-subtle p-2 text-warning-text">{run.notice}</p>}
-    <ol className="space-y-1">{stages.map(s => <li key={s.key} className="min-w-0"><Badge variant={stageVariant(s)} size="sm">{stageText(s)}</Badge> <span className="font-medium">{STAGE_LABEL[s.key].done.replace(/ (identified|saved|discovered|checked|written|asked)$/, "")}</span>{stageCounts(s) && <span className="tabular-nums text-secondary"> · {stageCounts(s)}</span>}{s.reason && <span className="block break-words text-xs text-secondary">{s.reason}</span>}</li>)}</ol>
+    <ol className="space-y-1">{stages.map(s => <li key={s.key} className="min-w-0"><Badge variant={stageVariant(s)} size="sm">{stageText(s)}</Badge> <span className="font-medium">{STAGE_LABEL[s.key].done.replace(/ (identified|saved|discovered|checked|written|asked)$/, "")}</span>{stageCounts(s) && <span className="tabular-nums text-secondary"> · {stageCounts(s)}</span>}{fallbackCounts(s) && <span className="tabular-nums text-secondary"> · {fallbackCounts(s)}</span>}{s.reason && <span className="block break-words text-xs text-secondary">{s.reason}</span>}<Attempts s={s} /></li>)}</ol>
     {run.state === "NEEDS_SELECTION" && <div className="space-y-2 rounded border border-warning-border p-3">
       <p className="font-medium">Which company is this?</p>
       <ul className="space-y-2">{candidates.map((c, i) => <li key={c.profile.linkedinUrl} className="min-w-0 rounded border border-border p-2">
@@ -157,6 +192,11 @@ function RunStatus({ run, stages, candidates, busy, onCancel, onRetry, onSelect,
         <p className="text-xs text-secondary">{[c.profile.domain, [c.profile.city, c.profile.country].filter(Boolean).join(", "), c.profile.industry, c.profile.employeeCount ? `${c.profile.employeeCount} employees` : null].filter(Boolean).join(" · ") || "Few details on this page."}</p>
         <p className="text-xs">{c.reasons.join(" ")}{c.conflicts.length ? <span className="text-warning-text"> {c.conflicts.join(" ")}</span> : null}</p>
         {canChoose && <Button size="sm" variant="outline" className="mt-1" disabled={busy} onClick={() => onSelect(i)}>This is the company</Button>}
+      </li>)}
+      {fallbackCandidates.map((c, i) => <li key={`fb-${c.domain}`} className="min-w-0 rounded border border-border p-2">
+        <p className="break-words"><span className="font-medium">{c.name}</span> <span className="text-xs text-secondary">· {c.domain}</span></p>
+        <p className="text-xs text-secondary">Found by {FALLBACK_LABEL[c.source.split(":")[0] as keyof typeof FALLBACK_LABEL] ?? c.source} from the company&apos;s name only. Check the website before choosing.</p>
+        {canChoose && <Button size="sm" variant="outline" className="mt-1" disabled={busy} onClick={() => onSelectFallback(i)}>This is the company</Button>}
       </li>)}</ul>
       {canChoose && <Button size="sm" variant="ghost" disabled={busy} onClick={onNone}>None of these</Button>}
     </div>}
@@ -168,10 +208,10 @@ type FieldProv = { source?: string; retrievedAt?: string; confidence?: number; c
 type EmailDomainRow = { domain: string; status: "alias" | "review" | "rejected"; basis: string; decidedBy?: string };
 type SourceContact = { name: string; profileUrl: string | null; headline: string; why: string };
 const DOMAIN_STATUS: Record<string, string> = { matched: "website domain", alias: "company email domain", review: "domain to review", rejected: "rejected domain", free: "free mailbox" };
-const OWNERSHIP: Record<string, string> = { inferred_from_name: "inferred from the name, not confirmed", provider_associated: "associated by the provider, not confirmed" };
+const OWNERSHIP: Record<string, string> = { inferred_from_name: "inferred from the name, not confirmed", provider_associated: "associated by the provider, not confirmed", confirmed_by_person: "confirmed as theirs by a person" };
 const FOUND_IN: Record<string, string> = { website: "on the website", source: "in the opportunity's source", company_profile: "on the company's profile", employee_search: "in the employee search", provider: "from a provider" };
 
-function CompanyCard({ company, contactPoints, people, canDecide, busy, onDecide }: { company: Snapshot["company"]; contactPoints: Snapshot["contactPoints"]; people: Person[]; canDecide: boolean; busy: boolean; onDecide: (domain: string, decision: "accept" | "reject") => void }) {
+function CompanyCard({ company, contactPoints, people, canDecide, busy, onDecide, onDecidePoint }: { company: Snapshot["company"]; contactPoints: Snapshot["contactPoints"]; people: Person[]; canDecide: boolean; busy: boolean; onDecide: (domain: string, decision: "accept" | "reject") => void; onDecidePoint: (pointId: string, decision: "attach" | "dismiss", who: string | null) => void }) {
   const e = (company.enrichment ?? {}) as { fields?: Record<string, FieldProv>; emailDomains?: EmailDomainRow[] };
   const prov = e.fields ?? {};
   const domains = e.emailDomains ?? [];
@@ -183,7 +223,9 @@ function CompanyCard({ company, contactPoints, people, canDecide, busy, onDecide
       {shown && p && <dd className="text-xs text-secondary">{p.confirmedBy ? "Confirmed by a person" : `${p.source?.replace(/^apify:/, "via ")} · ${p.retrievedAt?.slice(0, 10)} · confidence ${p.confidence}/100`}</dd>}</div>;
   };
   const safeHref = (u: string | null) => (u && /^https:\/\//.test(u) ? u : null);
-  const emails = contactPoints.filter(p => p.kind === "EMAIL");
+  const reviewOf = (p: Snapshot["contactPoints"][number]) => ((p.evidence ?? {}) as { review?: { provider?: string; decision?: string; identity?: { reasons?: string[] }; candidate?: { fullName?: string } } }).review ?? null;
+  const held = contactPoints.filter(p => p.kind === "EMAIL" && reviewOf(p) && !reviewOf(p)!.decision && p.possiblePersonId);
+  const emails = contactPoints.filter(p => p.kind === "EMAIL" && !held.includes(p));
   const phones = contactPoints.filter(p => p.kind === "PHONE");
   return <section className="space-y-3 rounded-xl border border-border p-4">
     <h2 className="font-semibold">Company</h2>
@@ -199,11 +241,28 @@ function CompanyCard({ company, contactPoints, people, canDecide, busy, onDecide
         {canDecide && <span className="mt-1 flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => onDecide(d.domain, "accept")}>It is the company&apos;s</Button><Button size="sm" variant="ghost" disabled={busy} onClick={() => onDecide(d.domain, "reject")}>Not the company&apos;s</Button></span>}</li>)}</ul>
     </div>}
     {domains.some(d => d.status === "alias") && <p className="text-xs text-secondary">Also the company&apos;s email {domains.filter(d => d.status === "alias").length === 1 ? "domain" : "domains"}: {domains.filter(d => d.status === "alias").map(d => `${d.domain} (${d.decidedBy ? "confirmed by a person" : d.basis.replace(/\.$/, "").toLowerCase()})`).join("; ")}.</p>}
+    {held.length > 0 && <div className="space-y-2 rounded border border-warning-border p-3">
+      <h3 className="text-sm font-medium">Addresses held for review</h3>
+      <p className="text-xs text-secondary">A provider returned these for someone saved here, but could not show it was the same person. They are not given to anyone until you decide.</p>
+      <ul className="space-y-2">{held.map(p => { const r = reviewOf(p)!; const who = nameOf(p.possiblePersonId); return <li key={p.id} className="min-w-0 break-words text-sm">{p.value} <span className="text-xs text-secondary">· returned by {FALLBACK_LABEL[r.provider as keyof typeof FALLBACK_LABEL] ?? r.provider} for {who ?? "someone saved here"}{r.candidate?.fullName && r.candidate.fullName !== who ? ` (as ${r.candidate.fullName})` : ""} · {DOMAIN_STATUS[p.domainStatus] ?? p.domainStatus}</span>
+        {r.identity?.reasons?.length ? <span className="block text-xs text-secondary">{r.identity.reasons.join(" ")}</span> : null}
+        {canDecide && <span className="mt-1 flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy || !["matched", "alias"].includes(p.domainStatus)} title={["matched", "alias"].includes(p.domainStatus) ? undefined : "Decide the domain first"} onClick={() => onDecidePoint(p.id, "attach", who)}>It is {who ?? "theirs"}</Button><Button size="sm" variant="ghost" disabled={busy} onClick={() => onDecidePoint(p.id, "dismiss", who)}>Not theirs</Button></span>}</li>; })}</ul>
+    </div>}
     {emails.length > 0 && <div><h3 className="text-sm font-medium">Company-wide and unassigned addresses</h3><p className="text-xs text-secondary">Not given to any person: role addresses, addresses that do not clearly name someone saved, and addresses on a domain not yet tied to the company.</p>
       <ul className="mt-1 space-y-1 text-sm">{emails.map(p => { const ev = (p.evidence ?? {}) as { url?: string | null; kind?: string }; const maybe = nameOf(p.possiblePersonId); return <li key={p.id} className="min-w-0 break-words">{p.value} <span className="text-xs text-secondary">· {p.isGeneric ? "role address" : maybe ? `may be ${maybe}'s — inferred from the name, not attached` : "names an unidentified person"} · {DOMAIN_STATUS[p.domainStatus] ?? p.domainStatus} · {["matched", "alias"].includes(p.domainStatus) ? CHECK_LABEL[p.verificationResult as keyof typeof CHECK_LABEL]?.label ?? p.verificationResult : "not checked"} · found {FOUND_IN[ev.kind ?? ""] ?? "in the evidence"}{ev.url && safeHref(ev.url) ? <> (<a className="underline" href={safeHref(ev.url) ?? undefined} target="_blank" rel="noopener noreferrer">page</a>)</> : null}</span></li>; })}</ul></div>}
     {phones.length > 0 && <div><h3 className="text-sm font-medium">Published phone numbers</h3>
       <ul className="mt-1 space-y-1 text-sm tabular-nums">{phones.map(p => { const ev = (p.evidence ?? {}) as { url?: string | null; kind?: string }; return <li key={p.id} className="min-w-0 break-words">{p.value} <span className="text-xs text-secondary">· company line, found {FOUND_IN[ev.kind ?? ""] ?? "in the evidence"} · not verified</span></li>; })}</ul></div>}
   </section>;
+}
+
+/** Why each person was searched, skipped or held for review in the last email search. */
+function Decisions({ decisions, review }: { decisions: Decision[]; review: PeopleReview[] }) {
+  if (!decisions.length && !review.length) return null;
+  return <details className="rounded border border-border p-3 text-sm">
+    <summary className="cursor-pointer font-medium">Why each person was searched or not ({decisions.length + review.length})</summary>
+    <ul className="mt-2 space-y-1">{decisions.map(d => <li key={d.personId} className="min-w-0 break-words"><Badge size="sm" variant={d.action === "found" ? "success" : d.action === "review" ? "warning" : "neutral"}>{DECISION_LABEL[d.action] ?? d.action}</Badge> <span className="font-medium">{d.name}</span><span className="block text-xs text-secondary">{d.reason}</span></li>)}
+      {review.map((r, i) => <li key={`pr-${i}`} className="min-w-0 break-words"><Badge size="sm" variant="warning">Not saved</Badge> <span className="font-medium">{r.name}</span> <span className="text-xs text-secondary">· from {FALLBACK_LABEL[r.provider as keyof typeof FALLBACK_LABEL] ?? r.provider}</span><span className="block text-xs text-secondary">{r.reason}</span></li>)}</ul>
+  </details>;
 }
 
 /** People named in the opportunity's source who are not shown to work at the buyer, such as a recruiter posting for a client. */

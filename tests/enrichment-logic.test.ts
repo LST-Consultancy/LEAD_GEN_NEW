@@ -6,6 +6,7 @@ import { importRowSchema } from "@/lib/ingest/import";
 import { contactStatusFor, mapChecks } from "@/lib/enrichment/verification";
 import { freshStages, runStateOf, type Stage } from "@/lib/enrichment/stages";
 import { enrichmentConfigSchema, estimate } from "@/lib/enrichment/config";
+import { addressDecision, type ExistingAddress } from "@/lib/enrichment/fallback";
 import { ATZEAN, COMPANY_PAGE, EMPLOYEES, SEARCH_ITEMS, WEBSITE_ITEMS, VERIFY_ITEMS, POST_REFERENCE } from "./helpers/enrichment-fixture";
 
 const ctx = { name: ATZEAN.name, evidenceDomains: [], evidenceLinkedin: [], searchWebsites: ["atzean-synthetic.example"], expectedCountry: "India", opportunityTerms: ["staffing", "IT"] };
@@ -181,11 +182,29 @@ describe("contact-quality regressions (E01–E06)", () => {
     const [f] = extractEmails("write to asha@othercorp.example", "atzean.com", { kind: "source", url: null });
     expect(f).toMatchObject({ domainStatus: "review", sameDomain: false });
   });
-  it("E01: accepts the same name on another ending as an alias", () => {
+  it("D02: a matching name under another ending is not accepted on its own — it goes to review", () => {
     expect(domainLabel("atzean.in")).toBe(domainLabel("atzean.com"));
     expect(domainLabel("atzean.co.in")).toBe("atzean");
-    expect(corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "source").accepted).toBe(true);
-    expect(corroborateAlias("othercorp.example", "atzean.com", "Atzean Technologies", "source").accepted).toBe(false);
+    // Unrelated companies can share a label: a post mentioning atzean.in proves nothing about atzean.com.
+    const fromPost = corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "source", "https://www.linkedin.com/posts/x");
+    expect(fromPost).toMatchObject({ accepted: false, official: false, basis: expect.stringContaining("does not show the same owner") });
+    // Even an employee-search or provider hit is not the company speaking.
+    expect(corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "employee_search").accepted).toBe(false);
+    expect(corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "provider").accepted).toBe(false);
+  });
+  it("D02: a company that really uses a different email domain is accepted when it publishes it itself", () => {
+    // The company's own website (a page on its own domain) lists an address on its other domain.
+    expect(corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "website", "https://www.atzean.com/contact")).toMatchObject({ accepted: true, official: true });
+    // A website domain and email domain can differ entirely, as long as the email one is the company's name.
+    expect(corroborateAlias("northwind.com", "northwindcloud.io", "Northwind", "company_profile", null)).toMatchObject({ accepted: true, official: true });
+  });
+  it("D02: a page that only claims to be the website, or a partner address on it, is not enough", () => {
+    // Evidence labelled "website" but from someone else's site is not the company's own publication.
+    expect(corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "website", "https://directory.example/atzean").accepted).toBe(false);
+    // The company's site publishing its vendor's address does not make the vendor's domain the company's.
+    expect(corroborateAlias("zendesk.com", "atzean.com", "Atzean Technologies", "website", "https://atzean.com/support")).toMatchObject({ accepted: false, official: true, basis: expect.stringContaining("partner") });
+  });
+  it("classifies an address on a corroborated alias as the company's", () => {
     expect(classify("asha@atzean.in", "atzean.com", { kind: "source", url: null, excerpt: null }, ["atzean.in"]).domainStatus).toBe("alias");
   });
   it("E05: a provider-returned role address is still generic", () => {
@@ -204,5 +223,39 @@ describe("contact-quality regressions (E01–E06)", () => {
   it("normalises a published phone and rejects fragments", () => {
     expect(normalisePhone("+91 (20) 1234-5678")).toBe("+912012345678");
     expect(normalisePhone("12-34")).toBeNull();
+  });
+});
+
+describe("D05: what counts as a usable existing address", () => {
+  const now = new Date("2026-09-25T00:00:00Z");
+  const days = (n: number) => new Date(now.getTime() - n * 86400000);
+  const opts = (over: Partial<Parameters<typeof addressDecision>[1]> = {}) => ({ onCompany: (e: string) => e.endsWith("@acme.example"), isRole: (e: string) => /^(info|sales)@/.test(e), suppressed: new Set<string>(), personSuppressed: false, verifyCacheDays: 30, now, ...over });
+  const addr = (value: string, verificationResult: string, over: Partial<ExistingAddress> = {}): ExistingAddress => ({ value, verificationResult, verifiedAt: days(1), optedOutAt: null, bounceCount: 0, status: "UNVERIFIED", ...over });
+
+  it("searches when there is no address, or only a role or off-domain one", () => {
+    expect(addressDecision([], opts()).action).toBe("search");
+    expect(addressDecision([addr("sales@acme.example", "MAILBOX_CONFIRMED")], opts())).toMatchObject({ action: "search", reason: expect.stringContaining("role address") });
+    expect(addressDecision([addr("asha@gmail.com", "MAILBOX_CONFIRMED")], opts())).toMatchObject({ action: "search", reason: expect.stringContaining("off the company's domain") });
+  });
+  it("replaces a known-invalid or bouncing address", () => {
+    expect(addressDecision([addr("asha@acme.example", "INVALID")], opts())).toMatchObject({ action: "search", reason: expect.stringContaining("invalid") });
+    expect(addressDecision([addr("asha@acme.example", "UNCHECKED", { bounceCount: 3 })], opts())).toMatchObject({ action: "search", reason: expect.stringContaining("bouncing") });
+  });
+  it("never looks up a replacement for a suppressed person or address", () => {
+    expect(addressDecision([addr("asha@acme.example", "INVALID")], opts({ suppressed: new Set(["asha@acme.example"]) })).action).toBe("blocked");
+    expect(addressDecision([addr("asha@acme.example", "INVALID", { optedOutAt: days(2) })], opts()).action).toBe("blocked");
+    expect(addressDecision([], opts({ personSuppressed: true })).action).toBe("blocked");
+  });
+  it("keeps unknown and catch-all apart from invalid: they are checked, not replaced", () => {
+    expect(addressDecision([addr("asha@acme.example", "CATCH_ALL")], opts())).toMatchObject({ action: "skip", reason: expect.stringContaining("catch-all") });
+    expect(addressDecision([addr("asha@acme.example", "UNKNOWN")], opts())).toMatchObject({ action: "skip", reason: expect.stringContaining("no result") });
+    expect(addressDecision([addr("asha@acme.example", "UNCHECKED", { verifiedAt: null })], opts()).action).toBe("skip");
+  });
+  it("skips a freshly confirmed address and asks for a recheck of a stale one", () => {
+    expect(addressDecision([addr("asha@acme.example", "MAILBOX_CONFIRMED")], opts())).toMatchObject({ action: "skip", reason: expect.stringContaining("confirmed") });
+    expect(addressDecision([addr("asha@acme.example", "MAILBOX_CONFIRMED", { verifiedAt: days(90) })], opts())).toMatchObject({ action: "recheck" });
+  });
+  it("prefers the best address when there are several", () => {
+    expect(addressDecision([addr("old@acme.example", "INVALID"), addr("asha@acme.example", "MAILBOX_CONFIRMED")], opts()).action).toBe("skip");
   });
 });

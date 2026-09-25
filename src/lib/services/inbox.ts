@@ -1,9 +1,10 @@
 import { readsReplies } from "./mailboxes";
 import "server-only";
+import { sendingReady } from "./mailbox-sending";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
 import { toPlain } from "@/lib/serialize";
-import { isEmailConfigured, activeEmailProvider } from "@/lib/outreach/provider";
+import { activeEmailProvider } from "@/lib/outreach/provider";
 
 /**
  * The Inbox is the one screen where the product's honesty problem is sharpest:
@@ -255,7 +256,7 @@ export async function getConversation(ctx: AuthContext, id: string) {
         : null,
     })),
     sending: {
-      configured: isEmailConfigured(),
+      configured: await sendingReady(ctx.workspaceId),
       provider,
       canReceive: replies,
     },
@@ -284,7 +285,7 @@ export async function getMailboxStatus(ctx: AuthContext) {
   ]);
 
   return {
-    configured: isEmailConfigured(),
+    configured: await sendingReady(ctx.workspaceId),
     provider: activeEmailProvider(),
     canReceive: replies,
     pendingApproval,

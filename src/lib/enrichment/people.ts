@@ -49,6 +49,13 @@ const FOCUS_TITLES: Record<RoleFocus, string[]> = {
  * The fuzzy search query sent to the Actor (it supports LinkedIn's OR operator). A small company
  * adds its founders and leaders to the roles the ask needs, since one person often holds several.
  */
+/** The same titles as a plain list, for providers whose search takes titles rather than a query. */
+export function focusTitleList(focus: RoleFocus | RoleFocus[], smallCompany: boolean): string[] {
+  const focuses = Array.isArray(focus) ? focus : [focus];
+  const per = focuses.length > 1 ? 3 : FOCUS_TITLES[focuses[0]].length;
+  const roleTitles = focuses.flatMap(f => FOCUS_TITLES[f].slice(0, per));
+  return [...new Set(smallCompany ? ["Founder", "Co-Founder", "CEO", "Managing Director", ...roleTitles] : [...roleTitles, "Founder", "CEO", "Director"])];
+}
 export function searchQueryFor(focus: RoleFocus | RoleFocus[], smallCompany: boolean): string {
   const focuses = Array.isArray(focus) ? focus : [focus];
   // Every group the ask needs gets its titles in, the primary group first, within one query.

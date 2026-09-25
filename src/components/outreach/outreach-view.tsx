@@ -48,6 +48,7 @@ type Sequence = {
   name: string;
   description: string | null;
   isActive: boolean;
+  senderMailboxId: string | null;
   stopOnReply: boolean;
   stopOnUnsubscribe: boolean;
   dailyCap: number;
@@ -80,14 +81,18 @@ type Provider = {
   }[];
 };
 
+type Senders = { mailboxes: { id: string; address: string; label: string; isDefaultSender: boolean }[]; relay: string | null };
+
 export function OutreachView({
   sequences,
   provider,
   suppressionCount,
+  senders = { mailboxes: [], relay: null },
 }: {
   sequences: Sequence[];
   provider: Provider;
   suppressionCount: number;
+  senders?: Senders;
 }) {
   const [expanded, setExpanded] = useState<string | null>(sequences[0]?.id ?? null);
 
@@ -145,6 +150,7 @@ export function OutreachView({
               key={s.id}
               sequence={s}
               provider={provider}
+              senders={senders}
               expanded={expanded === s.id}
               onToggle={() => setExpanded(expanded === s.id ? null : s.id)}
             />
@@ -229,11 +235,13 @@ function SequenceCard({
   provider,
   expanded,
   onToggle,
+  senders = { mailboxes: [], relay: null },
 }: {
   sequence: Sequence;
   provider: Provider;
   expanded: boolean;
   onToggle: () => void;
+  senders?: Senders;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -257,6 +265,22 @@ function SequenceCard({
       setBusy(false);
     }
   };
+
+  const changeSender = async (mailboxId: string) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await api.put<{ note: string }>(`/api/sequences/${sequence.id}/sender`, { mailboxId: mailboxId || null });
+      setMessage({ tone: "ok", text: res.note });
+      router.refresh();
+    } catch (err) {
+      setMessage({ tone: "bad", text: err instanceof Error ? err.message : "That did not work." });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const defaultSender = senders.mailboxes.find((m) => m.isDefaultSender)?.address ?? senders.relay;
+  const namedMissing = sequence.senderMailboxId && !senders.mailboxes.some((m) => m.id === sequence.senderMailboxId);
 
   const warnings = sequence.steps.flatMap((s) => s.copyWarnings);
   const brokenSteps = sequence.steps.filter((s) => s.unknownVariables.length > 0);
@@ -302,6 +326,20 @@ function SequenceCard({
               {formatNumber(sequence.stats.enrolled)}
             </p>
           </div>
+          <label className="flex min-w-0 items-center gap-1 text-2xs text-muted">
+            Sends from
+            <select
+              aria-label={`Mailbox ${sequence.name} sends from`}
+              value={sequence.senderMailboxId ?? ""}
+              disabled={busy}
+              onChange={(e) => void changeSender(e.target.value)}
+              className="max-w-44 truncate rounded border border-border bg-surface px-1 py-0.5 text-2xs text-primary"
+            >
+              <option value="">{defaultSender ? `Default (${defaultSender})` : "Default — none set up"}</option>
+              {namedMissing ? <option value={sequence.senderMailboxId!}>A mailbox that cannot send now</option> : null}
+              {senders.mailboxes.map((m) => <option key={m.id} value={m.id}>{m.address}</option>)}
+            </select>
+          </label>
           <Button size="sm" variant="ghost" asChild><Link href={`/outreach/${sequence.id}/edit`}>Edit</Link></Button>
           <EnrollLeadsButton sequenceId={sequence.id} sequenceName={sequence.name} />
           <Button

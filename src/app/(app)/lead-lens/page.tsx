@@ -5,7 +5,8 @@ import { LeadLensView } from "@/components/intelligence/lead-lens-view";
 
 export const metadata: Metadata = { title: "Lead Lens" };
 
-export default async function LeadLensPage() {
+export default async function LeadLensPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const ctx = await requireAuth();
-  return <LeadLensView readiness={await leadLensReadiness(ctx)} />;
+  const q = (await searchParams).q?.slice(0, 300) ?? "";
+  return <LeadLensView readiness={await leadLensReadiness(ctx)} initialQuery={q} />;
 }

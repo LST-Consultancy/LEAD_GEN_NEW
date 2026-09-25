@@ -188,3 +188,18 @@ export function buildMessage(email: OutgoingEmail, opts: { messageId: string; da
 
   return `${headers.join(CRLF)}${CRLF}${CRLF}${parts.join(CRLF)}`;
 }
+
+/**
+ * Threading headers for a message that continues a conversation (RFC 5322 §3.6.4): `In-Reply-To`
+ * is the message being answered, `References` the chain, oldest first. Without them a follow-up
+ * or a reply lands as a new thread in the recipient's client, and their answer may not reference
+ * anything this app sent. `References` keeps the first and the most recent ids when the chain is
+ * long, as the RFC suggests, and stays inside the 998-character line limit.
+ */
+export function threadHeaders(chain: string[]): Record<string, string> {
+  const ids = [...new Set(chain.map(id => id.trim()).filter(id => /^<[^<>\s]+@[^<>\s]+>$/.test(id)))];
+  if (!ids.length) return {};
+  let refs = ids.length > 10 ? [ids[0], ...ids.slice(-9)] : ids;
+  while (refs.join(" ").length > 900 && refs.length > 2) refs = [refs[0], ...refs.slice(2)];
+  return { "In-Reply-To": ids[ids.length - 1], References: refs.join(" ") };
+}

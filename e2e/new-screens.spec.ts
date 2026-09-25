@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
  */
 const SCREENS: { name: string; path: string; heading: RegExp }[] = [
   { name: "offerings", path: "/settings/offerings", heading: /Offerings/ },
-  { name: "email-accounts", path: "/settings/email", heading: /Reply reading/ },
+  { name: "email-accounts", path: "/settings/email", heading: /Mailboxes/ },
   { name: "whatsapp-api", path: "/settings/whatsapp-api", heading: /WhatsApp API/ },
   { name: "calendar", path: "/settings/calendar", heading: /Your calendar/ },
   { name: "team", path: "/settings/team", heading: /Team & roles/ },

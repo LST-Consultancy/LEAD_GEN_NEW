@@ -1,7 +1,9 @@
 import "server-only";
-import type { OutgoingEmail } from "@/lib/outreach/mime";
+import { buildMessage, messageId, type OutgoingEmail } from "@/lib/outreach/mime";
 import { activeEmailProvider, type EmailProviderName } from "@/lib/outreach/provider";
-import { sendViaSmtp } from "@/lib/outreach/adapters/smtp";
+import { sendViaSmtp, type SmtpConfig } from "@/lib/outreach/adapters/smtp";
+import { sendMime, type MailProvider, type MailTokens } from "@/lib/outreach/adapters/oauth-mail";
+import { ProviderRequestError } from "@/lib/providers/provider-errors";
 import { sendViaResend } from "@/lib/outreach/adapters/resend";
 
 /**
@@ -21,15 +23,22 @@ import { sendViaResend } from "@/lib/outreach/adapters/resend";
  */
 
 export type SendOutcome =
-  | { ok: true; providerMessageId: string; adapter: EmailProviderName }
+  | { ok: true; providerMessageId: string; adapter: EmailProviderName | MailboxAdapter }
   | {
       ok: false;
       code: SendFailure;
       reason: string;
       /** Whether the same message could succeed later, unchanged. */
       retryable: boolean;
-      adapter: EmailProviderName | null;
+      adapter: EmailProviderName | MailboxAdapter | null;
     };
+
+/** A workspace mailbox's own route, as opposed to the server relay. */
+export type MailboxAdapter = "mailbox_smtp" | "gmail_api" | "graph_api";
+export type SendRoute =
+  | { kind: "relay" }
+  | { kind: "smtp"; config: SmtpConfig }
+  | { kind: "oauth"; provider: MailProvider; tokens: MailTokens; workspaceId: string };
 
 export type SendFailure =
   | "not_configured"
@@ -89,5 +98,33 @@ export async function sendEmail(email: OutgoingEmail): Promise<SendOutcome> {
       retryable: true,
       adapter: provider,
     };
+  }
+}
+
+/**
+ * Sends through a chosen route: the server relay, or a workspace mailbox (its own SMTP server,
+ * or Gmail / Microsoft Graph over OAuth). Never throws, and says whether retrying could help —
+ * for the OAuth APIs a server error is not retried, because the provider may have accepted it.
+ */
+export async function sendEmailVia(email: OutgoingEmail, route: SendRoute): Promise<SendOutcome> {
+  if (route.kind === "relay") return sendEmail(email);
+  if (route.kind === "smtp") {
+    const r = await sendViaSmtp(email, route.config);
+    if (!r.ok && r.code === "auth_failed") return { ...r, adapter: "mailbox_smtp", reason: r.reason.replace("until SMTP_URL is corrected", "until the mailbox's SMTP password is corrected in Settings → Email Accounts") };
+    return { ...r, adapter: "mailbox_smtp" };
+  }
+  const adapter: MailboxAdapter = route.provider === "gmail" ? "gmail_api" : "graph_api";
+  const id = messageId(email.from.email.split("@")[1] ?? "localhost");
+  try {
+    const used = await sendMime(route.workspaceId, route.provider, route.tokens, buildMessage(email, { messageId: id }), id);
+    return { ok: true, providerMessageId: used, adapter };
+  } catch (err) {
+    const status = err instanceof ProviderRequestError ? err.status : null;
+    const who = route.provider === "gmail" ? "Gmail" : "Microsoft";
+    if (status === 401 || status === 403) return { ok: false, code: "auth_failed", reason: `${who} refused the mailbox's sign-in (HTTP ${status}). Reconnect it in Settings → Email Accounts. Nothing was sent.`, retryable: false, adapter };
+    if (status === 429) return { ok: false, code: "temporary", reason: `${who} is rate-limiting this mailbox. Nothing was sent yet; it will be tried again.`, retryable: true, adapter };
+    if (status === 400) return { ok: false, code: "permanent", reason: `${who} refused the message as malformed (HTTP 400). Nothing was sent.`, retryable: false, adapter };
+    if (status !== null && status >= 500) return { ok: false, code: "permanent", reason: `${who} returned a server error (HTTP ${status}). It may or may not have been sent — check the mailbox's Sent folder before sending again. Not retried automatically.`, retryable: false, adapter };
+    return { ok: false, code: "connection_failed", reason: `${who} could not be reached. Nothing was sent; it will be tried again.`, retryable: true, adapter };
   }
 }

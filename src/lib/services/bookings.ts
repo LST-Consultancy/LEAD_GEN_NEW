@@ -59,13 +59,14 @@ export function isCalendarConfigured(): boolean {
 }
 
 /**
- * Whether a calendar adapter exists to act on that credential. Google does
- * (`lib/calendar/google.ts`); it still syncs only for a host who connected
+ * Whether a calendar adapter exists to act on that credential. Google
+ * (`lib/calendar/google.ts`) and Microsoft 365 (`lib/calendar/microsoft.ts`) do;
+ * CalDAV does not; it still syncs only for a host who connected
  * their own calendar, so screens report sync per booking, never from this flag
  * alone — the Google client id is also Gmail's credential, and treating its
  * presence as "synced" once told users events existed that did not.
  */
-export const CALENDAR_ADAPTER_BUILT: Record<string, boolean> = { google: true, microsoft: false, caldav: false };
+export const CALENDAR_ADAPTER_BUILT: Record<string, boolean> = { google: true, microsoft: true, caldav: false };
 
 export function canSyncCalendar(): boolean {
   const active = activeCalendarProvider();
@@ -489,7 +490,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
   // After the record exists: the calendar is a side effect, and its failure is reported, not fatal.
   const stored = await db.booking.findUniqueOrThrow({ where: { id: (result.booking as { id: string }).id } });
   const sync = await syncBookingEvent(ctx.workspaceId, stored, "create", { invite: input.invite });
-  return { ...result, booking: { ...result.booking, ...(sync.externalId ? { provider: "google", externalId: sync.externalId } : {}) }, note: sync.note, calendarSynced: sync.synced };
+  return { ...result, booking: { ...result.booking, ...(sync.externalId ? { provider: sync.provider ?? "google", externalId: sync.externalId } : {}) }, note: sync.note, calendarSynced: sync.synced };
 }
 
 const outcomeSchema = z.object({

@@ -11,6 +11,7 @@ import { getChannelReach } from "@/lib/services/channels";
 import { EmailAccountsView } from "@/components/integrations/email-accounts-view";
 import { MailboxesPanel } from "@/components/integrations/mailboxes-panel";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { mailOAuthConfigured } from "@/lib/outreach/adapters/oauth-mail";
 
 export const metadata: Metadata = { title: "Email Accounts" };
 
@@ -40,8 +41,9 @@ const DOMAIN_CHECKS = [
   },
 ];
 
-export default async function EmailAccountsPage() {
+export default async function EmailAccountsPage({ searchParams }: { searchParams: Promise<{ mailbox?: string }> }) {
   const ctx = await requireAuth();
+  const notice = (await searchParams).mailbox?.slice(0, 400) ?? null;
   const [replies, mailboxes] = await Promise.all([readsReplies(ctx.workspaceId), listMailboxes(ctx)]);
   const reach = await getChannelReach(ctx, "email");
 
@@ -56,8 +58,9 @@ export default async function EmailAccountsPage() {
       canReceive={replies}
       reach={reach}
       domainChecks={DOMAIN_CHECKS}
+      workspaceSender={mailboxes.find((m) => m.isDefaultSender && m.sendStatus === "CONNECTED" && !m.revokedAt)?.address ?? null}
     >
-      <MailboxesPanel initial={mailboxes} canManage={ctx.permissions.includes(PERMISSIONS.WORKSPACE_MANAGE)} />
+      <MailboxesPanel initial={mailboxes} canManage={ctx.permissions.includes(PERMISSIONS.WORKSPACE_MANAGE)} notice={notice} oauth={{ gmail: mailOAuthConfigured("gmail"), microsoft: mailOAuthConfigured("microsoft") }} />
     </EmailAccountsView>
   );
 }

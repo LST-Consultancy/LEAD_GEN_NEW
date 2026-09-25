@@ -99,9 +99,11 @@ export function isEmailConfigured(): boolean {
 }
 
 /**
- * Which providers have a reply *reader* written — IMAP polling, a Gmail/Graph
- * watch, or an inbound webhook. None does yet. `canReceive` on the descriptor
- * says a provider could support reading; this says whether this app does.
+ * Whether the *server relay* itself reads replies. It never does: replies are
+ * read from the workspace's own mailboxes (IMAP, or Gmail / Microsoft Graph
+ * over OAuth) — see `readsReplies(workspaceId)` in `lib/services/mailboxes.ts`,
+ * which is the gate to use. `canReceive` on the descriptor says a provider
+ * could support reading; this says whether the relay path does.
  * Treating the first as the second let a stop-on-reply sequence activate over
  * SMTP while nothing read the mailbox, so replies stopped nothing unless a
  * person logged them by hand.

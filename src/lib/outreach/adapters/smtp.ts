@@ -25,7 +25,7 @@ import type { SendFailure, SendOutcome } from "@/lib/outreach/transport";
 
 const CRLF = "\r\n";
 
-type SmtpConfig = {
+export type SmtpConfig = {
   host: string;
   port: number;
   secure: boolean;
@@ -33,6 +33,8 @@ type SmtpConfig = {
   pass?: string;
   from: { name?: string; email: string };
   timeoutMs: number;
+  /** Refuse to authenticate unless the session is encrypted. Always true for workspace mailboxes. */
+  requireTls?: boolean;
 };
 
 /**
@@ -68,8 +70,12 @@ export function parseSmtpUrl(raw: string | undefined, fromAddress?: string): Smt
   };
 }
 
-export async function sendViaSmtp(email: OutgoingEmail): Promise<SendOutcome> {
-  const config = parseSmtpUrl(process.env.SMTP_URL, email.from.email);
+/**
+ * Sends one message. With `mailbox`, through that workspace mailbox's own SMTP server and account
+ * (always TLS: implicit on 465, or STARTTLS, which is then required); otherwise the server relay.
+ */
+export async function sendViaSmtp(email: OutgoingEmail, mailbox?: SmtpConfig): Promise<SendOutcome> {
+  const config = mailbox ?? parseSmtpUrl(process.env.SMTP_URL, email.from.email);
   if (!config) {
     return {
       ok: false,
@@ -87,10 +93,19 @@ export async function sendViaSmtp(email: OutgoingEmail): Promise<SendOutcome> {
   return runSession(config, email, payload, id);
 }
 
+/**
+ * Checks a mailbox's SMTP settings without sending anything: connect, EHLO, STARTTLS, log in, QUIT.
+ * A server that accepts the login may still refuse a particular From address; that is only known
+ * when a message is sent.
+ */
+export async function testSmtp(config: SmtpConfig): Promise<SendOutcome> {
+  return runSession(config, null, "", "");
+}
+
 /** One connection, one message. Connection reuse is a later optimisation. */
 async function runSession(
   config: SmtpConfig,
-  email: OutgoingEmail,
+  email: OutgoingEmail | null,
   payload: string,
   id: string
 ): Promise<SendOutcome> {
@@ -210,9 +225,22 @@ async function runSession(
           if (ehlo.code !== 250) return fail(ehlo, "at EHLO after STARTTLS");
         }
 
+        // A mailbox's own server must never be spoken to in clear: its password is on the wire.
+        if (config.requireTls && !config.secure && !(socket instanceof tls.TLSSocket)) {
+          return finish({ ok: false, code: "connection_failed", reason: `${config.host} did not offer STARTTLS, so the password was not sent. Use port 465 (TLS) or a server that supports STARTTLS. Nothing was sent.`, retryable: false, adapter: "smtp" });
+        }
+
         if (config.user && config.pass) {
           const auth = await authenticate(ehlo.text, config.user, config.pass);
           if (auth) return fail(auth, "at authentication");
+        }
+
+        if (!email) {
+          clearTimeout(timer);
+          settled = true;
+          socket.end(`QUIT${CRLF}`);
+          resolve({ ok: true, providerMessageId: "", adapter: "smtp" });
+          return;
         }
 
         const mailFrom = await command(`MAIL FROM:<${config.from.email}>`);

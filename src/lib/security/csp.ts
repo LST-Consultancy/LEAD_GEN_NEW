@@ -51,6 +51,9 @@ export function buildCsp(opts: CspOptions): string {
     "style-src": ["'self'", "'unsafe-inline'"],
     "img-src": ["'self'", "data:", "blob:", "https:"],
     "font-src": ["'self'", "data:"],
+    // The push service worker is this app's own file. Without this, workers fall back to
+    // script-src, where `strict-dynamic` ignores 'self' and registration would be refused.
+    "worker-src": ["'self'"],
     "connect-src": ["'self'", ...(opts.extraConnectSrc ?? []), ...(opts.isDev ? ["ws:", "wss:"] : [])],
     // Nothing here is embedded and nothing embeds others.
     "frame-src": ["'none'"],

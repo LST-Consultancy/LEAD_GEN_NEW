@@ -1,6 +1,7 @@
 "use client";
 import { Input } from "@/components/ui/input";
 import { FALLBACK_LABEL, FALLBACK_PROVIDERS, type FallbackProvider } from "@/lib/enrichment/fallback";
+import { CAPABILITIES, OPERATIONS, OPERATION_LABEL } from "@/lib/enrichment/capabilities";
 import { DEFAULT_ACTORS, EMPLOYEE_MODES, estimate, money, PRICE_NOTE, type EnrichmentConfig } from "@/lib/enrichment/config";
 
 const ROLES: { key: keyof EnrichmentConfig["actors"]; label: string }[] = [
@@ -38,15 +39,24 @@ export function EnrichmentSettings({ value, onChange }: { value: EnrichmentConfi
     </div>
     <label className="block text-sm">Budget per run (USD)<Input type="number" min={0.05} max={50} step={0.05} value={value.maxUsdPerRun} onChange={e => { const v = Number(e.target.value); if (v >= 0.05 && v <= 50) set({ maxUsdPerRun: v }); }} className="mt-1 max-w-32 tabular-nums" /><span className="text-xs text-secondary">A step whose estimate would exceed what is left is skipped, and Apify is told the remaining amount as the run&apos;s charge limit.</span></label>
     <div className="space-y-2 rounded border border-border p-3">
-      <label className="block text-sm"><input type="checkbox" checked={fb.enabled} onChange={e => setFb({ enabled: e.target.checked })} /> After Apify, ask contact providers for people still without a company email</label>
-      <p className="text-xs text-secondary">Uses your own SignalHire, Hunter and Apollo connections (each set up separately below), in this order, stopping for a person at the first one that returns an address. Each lookup can spend one of that provider&apos;s credits; they are billed by the provider, not estimated here. A provider that is not connected, or lacks what it needs for a person, is skipped and the run says why.</p>
+      <label className="block text-sm"><input type="checkbox" checked={fb.enabled} onChange={e => setFb({ enabled: e.target.checked })} /> When an Apify step finds nothing or too little, try other providers for that step</label>
+      <p className="text-xs text-secondary">Uses your own SignalHire, Hunter and Apollo connections (each set up separately below), in this order, for the steps switched on here, keeping what Apify already saved and asking only for what is missing. Paid calls are billed by the provider, not estimated here, and count against the limits below. A provider that cannot do a step, is not connected, or lacks an input is skipped and the run says why.</p>
       {fb.enabled && <div className="space-y-2">
         <ol className="space-y-1">{fb.order.map((p, i) => <li key={p} className="flex flex-wrap items-center gap-2 text-sm"><span className="tabular-nums text-secondary">{i + 1}.</span><span className="font-medium">{FALLBACK_LABEL[p]}</span>
           <button type="button" className="rounded border border-border px-1.5 text-xs disabled:opacity-50" disabled={i === 0} onClick={() => move(p, -1)} aria-label={`Move ${FALLBACK_LABEL[p]} earlier`}>↑</button>
           <button type="button" className="rounded border border-border px-1.5 text-xs disabled:opacity-50" disabled={i === fb.order.length - 1} onClick={() => move(p, 1)} aria-label={`Move ${FALLBACK_LABEL[p]} later`}>↓</button>
           <button type="button" className="text-xs underline disabled:opacity-50" disabled={fb.order.length === 1} onClick={() => toggle(p, false)}>Don&apos;t use</button></li>)}</ol>
         {FALLBACK_PROVIDERS.filter(p => !fb.order.includes(p)).map(p => <button key={p} type="button" className="mr-2 text-xs underline" onClick={() => toggle(p, true)}>Also use {FALLBACK_LABEL[p]}</button>)}
-        <label className="block text-sm">Provider lookups per run, across all providers<Input type="number" min={1} max={50} value={fb.maxLookupsPerRun} onChange={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 1 && v <= 50) setFb({ maxLookupsPerRun: v }); }} className="mt-1 max-w-32 tabular-nums" /></label>
+        <fieldset className="space-y-1"><legend className="text-sm font-medium">Steps that may use other providers</legend>
+          {OPERATIONS.map(op => { const can = fb.order.filter(p => CAPABILITIES[p][op].supported).map(p => FALLBACK_LABEL[p]); return <label key={op} className="block text-sm"><input type="checkbox" checked={fb.operations[op]} onChange={e => setFb({ operations: { ...fb.operations, [op]: e.target.checked } })} /> {OPERATION_LABEL[op]} <span className="text-xs text-secondary">— {can.length ? can.join(", ") : "none of the chosen providers can do this"}</span></label>; })}
+          <p className="text-xs text-secondary">A step switched off here is never done by another provider, even when Apify finds nothing.</p>
+        </fieldset>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className="block min-w-0 text-sm">Paid calls per run<Input type="number" min={1} max={50} value={fb.maxLookupsPerRun} onChange={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 1 && v <= 50) setFb({ maxLookupsPerRun: v }); }} className="mt-1 max-w-32 tabular-nums" /></label>
+          <label className="block min-w-0 text-sm">Paid calls per day, all runs<Input type="number" min={1} max={500} value={fb.maxLookupsPerDay} onChange={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 1 && v <= 500) setFb({ maxLookupsPerDay: v }); }} className="mt-1 max-w-32 tabular-nums" /></label>
+          <label className="block min-w-0 text-sm">Free searches per run<Input type="number" min={0} max={50} value={fb.maxFreeCallsPerRun} onChange={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v <= 50) setFb({ maxFreeCallsPerRun: v }); }} className="mt-1 max-w-32 tabular-nums" /></label>
+        </div>
+        <p className="text-xs text-secondary">A paid call is one that can spend a provider credit; each is recorded before it is made, so a retried or duplicated run cannot exceed these. Free searches (Hunter Domain Finder, Apollo People Search, SignalHire Search) use the provider&apos;s own quota. These limit how many calls are made — what each call costs is set by your provider plan.</p>
       </div>}
     </div>
     <div className="space-y-2 rounded border border-border p-3">

@@ -1,10 +1,10 @@
 import "server-only";
+import { sendingReady } from "./mailbox-sending";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
 import { MutationError, loadScoped } from "@/lib/services/mutate";
 import { TOOLS, type Tool, type ToolResult } from "@/lib/ai/tools";
-import { isEmailConfigured } from "@/lib/outreach/provider";
 import { localParts } from "@/lib/outreach/sendability";
 import {
   evaluate,
@@ -226,7 +226,7 @@ export async function runToolAsAgent(
     action,
     usedToday: await usageToday(ctx, agent.id),
     tool: tool ? { known: true, implemented: tool.implemented } : { known: false, implemented: false },
-    providerReady: isEmailConfigured(),
+    providerReady: await sendingReady(ctx.workspaceId),
     localWeekday: weekday,
     localHour: hour,
     alreadyApproved: opts.alreadyApproved ?? false,

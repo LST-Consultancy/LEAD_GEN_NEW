@@ -1,7 +1,9 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { isEmailConfigured, activeEmailProvider } from "@/lib/outreach/provider";
-import { sendEmail } from "@/lib/outreach/transport";
+import { activeEmailProvider } from "@/lib/outreach/provider";
+import { sendEmailVia } from "@/lib/outreach/transport";
+import { threadHeaders } from "@/lib/outreach/mime";
+import { senderFor, sendingReady } from "@/lib/services/mailbox-sending";
 import { log } from "@/lib/observability/log";
 import { render } from "@/lib/outreach/template";
 import { resolveRecipient, suppressionLookup } from "@/lib/outreach/recipient";
@@ -82,6 +84,7 @@ export async function sendMessage(workspaceId: string, messageId: string) {
           sequence: {
             select: {
               id: true,
+              senderMailboxId: true,
               isActive: true,
               stopOnReply: true,
               stopOnUnsubscribe: true,
@@ -122,7 +125,7 @@ export async function sendMessage(workspaceId: string, messageId: string) {
   // A one-off reply has no sequence, so the window and cap rules do not apply
   // to it — a person clicking reply has made the timing decision themselves.
   const { sendable, blockers } = checkSendable({
-    providerConfigured: isEmailConfigured(),
+    providerConfigured: await sendingReady(workspaceId),
     toAddress: message.toAddress,
     suppression,
     leadRepliedAt: message.conversation.lead?.repliedAt ?? null,
@@ -165,23 +168,45 @@ export async function sendMessage(workspaceId: string, messageId: string) {
     };
   }
 
+  // Which mailbox sends it: the one named for the message or its sequence, else the workspace
+  // default, else the server relay. A named mailbox that cannot send holds the message.
+  const sender = await senderFor(workspaceId, message.mailboxId ?? sequence?.senderMailboxId ?? null);
+  if (!sender.ok) {
+    await db.message.update({ where: { id: message.id }, data: { state: "QUEUED", failureReason: sender.reason } });
+    return { sent: false, blocked: ["no_sender"], willRetry: true, disposition: "hold" as const };
+  }
+
+  // Claim it before sending. Only one worker can move the claim from empty, so a redelivered job or
+  // a second worker cannot send it again. A claim left behind by a worker that died mid-send is not
+  // retried blindly: the relay may already have accepted it.
+  const claim = await db.message.updateMany({ where: { id: message.id, workspaceId, state: "QUEUED", sendClaimedAt: null }, data: { sendClaimedAt: new Date(), mailboxId: sender.mailboxId } });
+  if (claim.count === 0) {
+    const current = await db.message.findUnique({ where: { id: message.id }, select: { state: true, sendClaimedAt: true } });
+    if (current?.state === "QUEUED" && current.sendClaimedAt && Date.now() - current.sendClaimedAt.getTime() > 10 * 60_000) {
+      await db.message.update({ where: { id: message.id }, data: { state: "FAILED", failureReason: `A send started at ${current.sendClaimedAt.toISOString()} and its result was never recorded, so it may or may not have gone out. It was not sent again automatically — check the mailbox's Sent folder before resending.` } });
+    }
+    return { skipped: "already_claimed" };
+  }
+
+  // Threading: answer the latest message in this conversation, and carry the chain.
+  const chain = (await db.message.findMany({ where: { workspaceId, conversationId: message.conversationId, id: { not: message.id }, externalId: { not: null }, deletedAt: null, OR: [{ direction: "INBOUND" }, { state: { in: ["SENT", "DELIVERED", "READ", "REPLIED"] } }] }, orderBy: { createdAt: "asc" }, select: { externalId: true }, take: 50 })).map(m => m.externalId!);
+
   // The rules ran and this message passed them. Now it is actually sent.
-  const outcome = await sendEmail({
-    from: {
-      name: process.env.EMAIL_FROM_NAME || undefined,
-      email: message.fromAddress ?? process.env.EMAIL_FROM ?? "",
-    },
+  const outcome = await sendEmailVia({
+    // A workspace mailbox always sends as itself; the relay keeps its old behaviour.
+    from: sender.mailboxId ? sender.from : { name: process.env.EMAIL_FROM_NAME || undefined, email: message.fromAddress ?? process.env.EMAIL_FROM ?? "" },
     // Non-null: `checkSendable` blocks on a missing address before here.
     to: { email: message.toAddress! },
     subject: message.subject ?? "",
     text: message.body,
     html: message.bodyHtml ?? undefined,
     headers: {
+      ...threadHeaders(chain),
       // Lets a reply be tied back to this message without parsing the subject,
       // and gives bounce processing something stable to key on.
       "X-Signalroom-Message-Id": message.id,
     },
-  });
+  }, sender.route);
 
   if (!outcome.ok) {
     // A retryable failure stays QUEUED so a later pass picks it up; a
@@ -192,6 +217,8 @@ export async function sendMessage(workspaceId: string, messageId: string) {
       data: {
         state: outcome.retryable ? "QUEUED" : "FAILED",
         failureReason: outcome.reason,
+        // Nothing was accepted, so a later pass may claim it again.
+        ...(outcome.retryable ? { sendClaimedAt: null } : {}),
         // A refused recipient is a fact about the address, not about this
         // message, so it is recorded where the next send will see it.
         ...(outcome.code === "rejected_recipient" ? { bouncedAt: new Date() } : {}),
@@ -218,6 +245,7 @@ export async function sendMessage(workspaceId: string, messageId: string) {
     data: {
       state: "SENT",
       sentAt: new Date(),
+      ...(sender.mailboxId ? { fromAddress: sender.from.email } : {}),
       // The provider's own id, which is what a bounce or a delivery receipt
       // will reference.
       externalId: outcome.providerMessageId,
@@ -334,6 +362,7 @@ export async function advanceSequences(workspaceId: string) {
     })
   );
 
+  const ready = await sendingReady(workspaceId);
   let queued = 0;
   let stopped = 0;
   let rescheduled = 0;
@@ -389,7 +418,7 @@ export async function advanceSequences(workspaceId: string) {
     );
 
     const { sendable, blockers } = checkSendable({
-      providerConfigured: isEmailConfigured(),
+      providerConfigured: ready,
       toAddress,
       suppression,
       leadRepliedAt: lead.repliedAt,
@@ -469,10 +498,13 @@ export async function advanceSequences(workspaceId: string) {
         update: { lastMessageAt: now, state: "WAITING" },
       });
 
-      await db.message.create({
-        data: {
+      // One message per enrollment and step, ever: a redelivered job that already queued this step
+      // finds the key taken and does not queue a second copy.
+      const created = await db.message.createMany({
+        data: [{
           workspaceId,
           conversationId: conversation.id,
+          mailboxId: enrollment.sequence.senderMailboxId ?? null,
           direction: "OUTBOUND",
           channel: step.channel,
           state: "QUEUED",
@@ -481,9 +513,11 @@ export async function advanceSequences(workspaceId: string) {
           body: bodyRender.text,
           actorType: "SYSTEM",
           sequenceStepId: step.id,
-        },
+          idempotencyKey: `seq:${workspaceId}:${enrollment.id}:${step.id}`,
+        }],
+        skipDuplicates: true,
       });
-      queued += 1;
+      if (created.count) queued += 1;
     }
 
     const isLast = step.stepOrder >= Math.max(...steps.map((s) => s.stepOrder));

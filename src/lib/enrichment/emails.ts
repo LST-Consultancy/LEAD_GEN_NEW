@@ -41,21 +41,29 @@ export const domainLabel = (host: string) => {
 
 /**
  * Whether a domain seen in evidence can be accepted as the company's email domain without asking.
- * Accepted: the same name as the website domain on another ending (atzean.in for atzean.com), or —
- * when the company's own page or website published it — a domain whose name is the company's name.
- * Anything else is left for review; an address merely appearing near a company name proves nothing.
+ *
+ * A matching name under another ending is **not** proof of common ownership: atzean.in and
+ * atzean.com can belong to unrelated companies. So acceptance needs corroborating *official*
+ * evidence — the address published by the company itself, on its own website (a page under its
+ * resolved website domain) or its own company profile — and the domain's name must also be the
+ * company's (its website name or its own name), so a partner or vendor address published on the
+ * company's site is not mistaken for its own. Anything else is kept, with its evidence, for a
+ * targeted review; nothing is discarded.
  */
-export function corroborateAlias(host: string, websiteDomain: string | null, companyName: string, kind: EvidenceKind): { accepted: boolean; basis: string } {
+export type AliasVerdict = { accepted: boolean; basis: string; official: boolean };
+export function corroborateAlias(host: string, websiteDomain: string | null, companyName: string, kind: EvidenceKind, evidenceUrl: string | null = null): AliasVerdict {
   const label = domainLabel(host);
-  if (label.length < 3 || FREE.test(`@${host}`)) return { accepted: false, basis: "Too short or a free mailbox to tie to the company." };
+  if (label.length < 3 || FREE.test(`@${host}`)) return { accepted: false, official: false, basis: "Too short or a free mailbox to tie to the company." };
   const site = websiteDomain ? domainLabel(websiteDomain) : "";
-  if (site && site === label) return { accepted: true, basis: `Same name as the website domain ${websiteDomain} on a different ending.` };
   const companyLabel = nameKey(companyName).replace(/\s+/g, "");
-  const ownPublication = kind === "company_profile" || kind === "website";
-  if (ownPublication && companyLabel.length >= 4 && (label === companyLabel || companyLabel.startsWith(label) && label.length >= 5)) {
-    return { accepted: true, basis: `The company's own ${kind === "website" ? "website" : "profile"} publishes it, and the domain is the company's name.` };
-  }
-  return { accepted: false, basis: websiteDomain ? `Not the website domain (${websiteDomain}) and not corroborated as the company's.` : "The company's website is not known, so the domain cannot be checked yet." };
+  const nameMatches = (site && site === label) || (companyLabel.length >= 4 && (label === companyLabel || (companyLabel.startsWith(label) && label.length >= 5)));
+  const pageHost = (() => { try { return evidenceUrl ? new URL(evidenceUrl).hostname.toLowerCase().replace(/^www\./, "") : null; } catch { return null; } })();
+  const onOwnSite = kind === "website" && Boolean(websiteDomain && pageHost && (pageHost === websiteDomain || pageHost.endsWith(`.${websiteDomain}`)));
+  const official = onOwnSite || kind === "company_profile";
+  if (official && nameMatches) return { accepted: true, official, basis: `Published by the company itself (${onOwnSite ? `its website, ${pageHost}` : "its company profile"}), and the domain carries the company's name.` };
+  if (official) return { accepted: false, official, basis: `Published on the company's own ${onOwnSite ? "website" : "profile"}, but ${host} does not carry the company's name — it may be a partner's or a provider's. Accept only if the company uses it for its own email.` };
+  if (nameMatches) return { accepted: false, official, basis: `Same name as ${websiteDomain ?? "the company"} under a different ending. That alone does not show the same owner — accept if the company uses ${host} for email; it is confirmed automatically if the company's website or profile publishes an address there.` };
+  return { accepted: false, official, basis: websiteDomain ? `Not the website domain (${websiteDomain}) and nothing official ties it to the company.` : "The company's website is not known, so the domain cannot be checked yet." };
 }
 
 export function extractEmails(text: string, companyDomainValue: string | null, evidence: Omit<FoundEmail["evidence"], "excerpt">, aliases: string[] = []): FoundEmail[] {

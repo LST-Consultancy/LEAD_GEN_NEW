@@ -338,3 +338,28 @@ describe("classify", () => {
     }
   });
 });
+
+describe("a workspace mailbox's SMTP check", () => {
+  it("logs in and quits without sending anything", async () => {
+    const { server, session } = scriptedServer();
+    const port = await listen(server);
+    try {
+      const { testSmtp } = await import("@/lib/outreach/adapters/smtp");
+      const r = await testSmtp({ host: "127.0.0.1", port, secure: false, user: "u", pass: "p", from: { email: "sales@northbridge.example" }, timeoutMs: 5000 });
+      expect(r).toMatchObject({ ok: true });
+      expect(session.commands.some(c => c.startsWith("AUTH"))).toBe(true);
+      expect(session.commands.some(c => /^(MAIL|RCPT|DATA)/.test(c))).toBe(false);
+    } finally { server.close(); }
+  });
+
+  it("never sends a mailbox password in clear: no STARTTLS offered means no login", async () => {
+    const { server, session } = scriptedServer();
+    const port = await listen(server);
+    try {
+      const { testSmtp } = await import("@/lib/outreach/adapters/smtp");
+      const r = await testSmtp({ host: "127.0.0.1", port, secure: false, user: "u", pass: "secret", from: { email: "sales@northbridge.example" }, timeoutMs: 5000, requireTls: true });
+      expect(r).toMatchObject({ ok: false, retryable: false, reason: expect.stringContaining("did not offer STARTTLS") });
+      expect(session.commands.some(c => c.startsWith("AUTH"))).toBe(false);
+    } finally { server.close(); }
+  });
+});

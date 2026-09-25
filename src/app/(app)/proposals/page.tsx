@@ -1,8 +1,8 @@
+import { sendingReady } from "@/lib/services/mailbox-sending";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { requireAuth } from "@/lib/auth/context";
 import { listProposals } from "@/lib/services/proposals";
-import { isEmailConfigured } from "@/lib/outreach/provider";
 import { ProposalsView } from "@/components/proposals/proposals-view";
 
 export const metadata: Metadata = { title: "Proposals" };
@@ -20,7 +20,7 @@ export default async function ProposalsPage() {
   return (
     <ProposalsView
       proposals={proposals}
-      emailConfigured={isEmailConfigured()}
+      emailConfigured={await sendingReady(ctx.workspaceId)}
       baseUrl={`${proto}://${host}`}
     />
   );

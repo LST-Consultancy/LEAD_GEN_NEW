@@ -647,16 +647,24 @@ export function CompanyPanel({
       </CardContent>
 
       <CardFooter className="flex-col items-start gap-1">
-        {/* External research (funding, news, hiring) has no adapter; say so instead of offering a button that cannot run. */}
+        {/* Funding, news and hiring research has no adapter; company research from outside does (Lead Lens), at a cost it states before running. */}
         <p className="text-2xs leading-relaxed text-muted">
-          Research from outside sources is not built yet, so nothing here spends points.
+          Funding, news and hiring research from outside sources is not built. The company&apos;s own
+          profile can be looked up in Lead Lens, which shows its cost before anything is spent.
         </p>
-        <Button variant="secondary" size="sm" asChild>
-          <Link href="/research">
-            <Brain />
-            Research from your own data
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-1.5">
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/research">
+              <Brain />
+              Research from your own data
+            </Link>
+          </Button>
+          {company.website ? (
+            <Button variant="ghost" size="sm" asChild>
+              <Link href={`/lead-lens?q=${encodeURIComponent(company.website.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))}`}>Look up in Lead Lens</Link>
+            </Button>
+          ) : null}
+        </div>
       </CardFooter>
     </Card>
   );

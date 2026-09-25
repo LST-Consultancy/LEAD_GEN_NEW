@@ -3,14 +3,16 @@ import { profileKeyOf } from "./people";
 
 /**
  * Lead Lens external lookup: what was asked, and how each provider's answer maps to a person or a
- * company. Pure. Only lookups with a definite target are supported — a LinkedIn profile, a LinkedIn
- * company page or a domain. A bare name would need a paid people search that returns many
- * namesakes, so it stays a workspace-only search.
+ * company. Pure. A LinkedIn profile, a LinkedIn company page and a domain are definite targets. A
+ * bare person's name ("Priya Menon", optionally "at Northbridge") is not: it is searched with the
+ * providers' free people searches and every namesake is shown for a person to choose, and only the
+ * chosen one is revealed with a paid lookup.
  */
 export type LookupTarget =
   | { kind: "person_linkedin"; key: string; url: string }
   | { kind: "company_linkedin"; key: string; url: string }
   | { kind: "domain"; key: string; domain: string }
+  | { kind: "person_name"; key: string; name: string; company: string | null }
   | { kind: "unsupported"; reason: string };
 
 export function classifyTarget(raw: string): LookupTarget {
@@ -28,7 +30,15 @@ export function classifyTarget(raw: string): LookupTarget {
     const domain = companyDomain(q);
     if (domain) return { kind: "domain", key: `dom:${domain}`, domain };
   }
-  return { kind: "unsupported", reason: "Paste a LinkedIn profile or company URL, or a company domain. A name alone matches too many people to look up externally; it is searched in this workspace only." };
+  // A person's name: two to five words of letters, optionally followed by "at Company", "@ Company",
+  // "— Company" or ", Company". The qualifier is split off first, so it is never read as more name.
+  const [namePart, ...rest] = q.split(/\s+(?:at|@|—|–)\s+|\s*,\s*/i);
+  const company = rest.join(" ").trim() || null;
+  if (/^[\p{L}][\p{L}.'’-]*(?:\s+[\p{L}][\p{L}.'’-]*){1,4}$/u.test(namePart.trim()) && (!company || company.length <= 80)) {
+    const name = namePart.replace(/\s+/g, " ").trim();
+    return { kind: "person_name", key: `name:${name.toLowerCase()}|${(company ?? "").toLowerCase()}`, name, company };
+  }
+  return { kind: "unsupported", reason: "Paste a LinkedIn profile or company URL, a company domain, or a person's full name (optionally \"at Company\"). A single word matches too many people to look up." };
 }
 
 export type LookedUpPerson = {
@@ -45,7 +55,7 @@ const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const split = (full: string) => { const parts = full.trim().split(/\s+/); return { first: parts[0] ?? null, last: parts.length > 1 ? parts.slice(1).join(" ") : null }; };
 
 /** SignalHire Person API candidate: `{ uid, fullName, headLine, locations[], experience[], contacts[] }`. */
-export function fromSignalHire(c: unknown, askedUrl: string): LookedUpPerson | null {
+export function fromSignalHire(c: unknown, askedUrl: string | null): LookedUpPerson | null {
   const r = (c ?? {}) as Record<string, unknown>;
   const fullName = s(r.fullName); if (!fullName) return null;
   const exp = (Array.isArray(r.experience) ? r.experience : []) as Record<string, unknown>[];
@@ -79,4 +89,15 @@ export function fromApollo(person: unknown, confidence: string | null, askedUrl:
     providerRef: s(p.id) ? `apollo:${s(p.id)}` : null,
     match: confidence === "high" ? "high" : confidence === "medium" ? "medium" : "low",
   };
+}
+
+/** One namesake from a free people search, shown for a person to choose. Nothing about it is saved until then. */
+export type NameCandidate = { provider: "signalhire" | "apollo"; ref: string; fullName: string; title: string | null; company: string | null; location: string | null; nameIsPartial: boolean };
+
+/** Ranks namesakes: the asked-for company first, then a full-name match, then the rest. Pure. */
+export function rankNameCandidates(list: NameCandidate[], name: string, company: string | null): NameCandidate[] {
+  const norm = (v: string | null) => (v ?? "").toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
+  const n = norm(name); const c = norm(company);
+  const score = (x: NameCandidate) => (c && norm(x.company).includes(c) ? 4 : 0) + (norm(x.fullName) === n ? 2 : norm(x.fullName).startsWith(n.split(" ")[0]) ? 1 : 0);
+  return [...list].sort((a, b) => score(b) - score(a));
 }

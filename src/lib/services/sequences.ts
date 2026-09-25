@@ -1,4 +1,5 @@
 import "server-only";
+import { sendingReady } from "./mailbox-sending";
 import { readsReplies } from "./mailboxes";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -7,7 +8,6 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate } from "@/lib/services/mutate";
 import {
-  isEmailConfigured,
   activeEmailProvider,
   EMAIL_NOT_CONFIGURED,
   REPLIES_NOT_READABLE,
@@ -161,6 +161,7 @@ export async function listSequences(ctx: AuthContext) {
         name: s.name,
         description: s.description,
         isActive: s.isActive,
+        senderMailboxId: s.senderMailboxId,
         stopOnReply: s.stopOnReply,
         stopOnUnsubscribe: s.stopOnUnsubscribe,
         sendWindowStart: s.sendWindowStart,
@@ -402,7 +403,7 @@ export async function setSequenceActive(ctx: AuthContext, id: string, isActive: 
         422
       );
     }
-    if (!isEmailConfigured()) {
+    if (!(await sendingReady(ctx.workspaceId))) {
       throw new MutationError(EMAIL_NOT_CONFIGURED, "no_provider", 422);
     }
     if (sequence.stopOnReply && !(await readsReplies(ctx.workspaceId))) {
@@ -550,6 +551,7 @@ export async function enrollLeads(
   const enrollable: string[] = [];
   const skipped: { leadId: string; name: string; reason: string }[] = [];
   const now = new Date();
+  const ready = await sendingReady(ctx.workspaceId);
 
   for (const leadId of input.leadIds) {
     const lead = leads.find((l) => l.id === leadId);
@@ -575,7 +577,7 @@ export async function enrollLeads(
     });
 
     const { sendable, blockers } = checkSendable({
-      providerConfigured: isEmailConfigured(),
+      providerConfigured: ready,
       toAddress,
       suppression,
       leadRepliedAt: lead.repliedAt,
@@ -641,7 +643,7 @@ export async function enrollLeads(
         enrolled: enrollable.length,
         skipped,
         firstSendAt: firstSend.toISOString(),
-        note: !isEmailConfigured()
+        note: !ready
           ? `${enrollable.length} enrolled and queued behind the first step. Nothing sends until a mailbox is connected — the enrollments are kept, not dropped, so connecting one is all that is needed.`
           : sequence.isActive
             ? `${enrollable.length} enrolled. First step goes out from ${firstSend.toISOString()}.`
@@ -793,7 +795,7 @@ export async function previewStep(
     unknown,
     copyWarnings: reviewCopy(subject.text, body.text),
     provider: activeEmailProvider(),
-    configured: isEmailConfigured(),
+    configured: await sendingReady(ctx.workspaceId),
   };
 }
 

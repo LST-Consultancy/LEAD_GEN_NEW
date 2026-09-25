@@ -1,3 +1,4 @@
+import { listSenders, sendingReady } from "@/lib/services/mailbox-sending";
 import { readsReplies } from "@/lib/services/mailboxes";
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/context";
@@ -8,8 +9,7 @@ import {
   EMAIL_NOT_CONFIGURED,
   REPLIES_NOT_READABLE,
   activeEmailProvider,
-  isEmailConfigured,
-} from "@/lib/outreach/provider";
+  } from "@/lib/outreach/provider";
 import { OutreachView } from "@/components/outreach/outreach-view";
 
 export const metadata: Metadata = { title: "Outreach" };
@@ -17,8 +17,9 @@ export const metadata: Metadata = { title: "Outreach" };
 export default async function OutreachPage() {
   const ctx = await requireAuth();
   const replies = await readsReplies(ctx.workspaceId);
-  const [sequences, suppressionCount] = await Promise.all([
+  const [sequences, senders, suppressionCount] = await Promise.all([
     listSequences(ctx),
+    listSenders(ctx),
     db.suppression.count({ where: { workspaceId: ctx.workspaceId } }),
   ]);
 
@@ -26,8 +27,9 @@ export default async function OutreachPage() {
     <OutreachView
       sequences={sequences}
       suppressionCount={suppressionCount}
+      senders={senders}
       provider={{
-        configured: isEmailConfigured(),
+        configured: await sendingReady(ctx.workspaceId),
         provider: activeEmailProvider(),
         canReceive: replies,
         notConfiguredMessage: EMAIL_NOT_CONFIGURED,
