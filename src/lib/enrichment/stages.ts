@@ -3,7 +3,7 @@
  * the worker and the screen, so the label a person reads is computed from the same outcome the
  * worker recorded. No server imports.
  */
-export const STAGE_KEYS = ["resolve", "details", "people", "emails", "verify", "summary"] as const;
+export const STAGE_KEYS = ["resolve", "details", "people", "emails", "contacts", "verify", "summary"] as const;
 export type StageKey = typeof STAGE_KEYS[number];
 export const RUN_KINDS = ["research", "people", "emails", "verify", "enrich"] as const;
 export type RunKind = typeof RUN_KINDS[number];
@@ -12,9 +12,9 @@ export type RunKind = typeof RUN_KINDS[number];
 export const PLAN: Record<RunKind, StageKey[]> = {
   research: ["resolve", "details", "summary"],
   people: ["resolve", "details", "people"],
-  emails: ["resolve", "details", "emails"],
+  emails: ["resolve", "details", "emails", "contacts"],
   verify: ["verify"],
-  enrich: ["resolve", "details", "people", "emails", "verify", "summary"],
+  enrich: ["resolve", "details", "people", "emails", "contacts", "verify", "summary"],
 };
 /** The stage whose result decides "completed with results" versus "no matches" for each button. */
 export const MAIN: Record<RunKind, StageKey[]> = { research: ["resolve", "details"], people: ["people"], emails: ["emails"], verify: ["verify"], enrich: ["resolve", "details", "people", "emails"] };
@@ -29,6 +29,7 @@ export const STAGE_LABEL: Record<StageKey, { running: string; done: string }> = 
   details: { running: "Saving company details", done: "Company details saved" },
   people: { running: "Finding relevant people", done: "People saved" },
   emails: { running: "Discovering emails", done: "Emails discovered" },
+  contacts: { running: "Asking contact providers", done: "Contact providers asked" },
   verify: { running: "Checking emails", done: "Emails checked" },
   summary: { running: "Writing a summary", done: "Summary written" },
 };

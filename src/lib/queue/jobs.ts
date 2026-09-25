@@ -13,6 +13,10 @@ export const JOB = {
   OPPORTUNITY_ACTION: "opportunity.action",
   OPPORTUNITY_DISCOVERY: "opportunity.discovery",
   OPPORTUNITY_WATCHES: "opportunity.watches",
+  /** Reads connected mailboxes over IMAP and records replies to what was sent. */
+  MAILBOX_SYNC: "mail.sync_mailboxes",
+  /** Emails the notifications people asked to receive by email. */
+  NOTIFICATION_EMAILS: "notifications.email",
   OPPORTUNITY_ENRICHMENT: "opportunity.enrichment",
   /** Re-runs the scoring engine over a workspace's leads. */
   RESCORE_WORKSPACE: "rescore.workspace",
@@ -60,6 +64,8 @@ export type JobPayloads = {
   [JOB.OPPORTUNITY_ACTION]: { workspaceId: string; userId: string; opportunityId: string; syncId: string; operation: "enrich" | "verify" | "research" };
   [JOB.OPPORTUNITY_DISCOVERY]: { workspaceId: string; searchId: string };
   [JOB.OPPORTUNITY_WATCHES]: { workspaceId: string };
+  [JOB.MAILBOX_SYNC]: { workspaceId: string };
+  [JOB.NOTIFICATION_EMAILS]: { workspaceId: string };
   [JOB.OPPORTUNITY_ENRICHMENT]: { workspaceId: string; runId: string };
   [JOB.RESCORE_WORKSPACE]: { workspaceId: string; reason?: string };
   [JOB.RESCORE_LEAD]: { workspaceId: string; leadId: string; reason?: string };
@@ -90,6 +96,8 @@ export const JOB_POLICY: Record<
   [JOB.OPPORTUNITY_ACTION]: { attempts: 2, backoffMs: 10000, timeoutMs: 300000 },
   [JOB.OPPORTUNITY_DISCOVERY]: { attempts: 3, backoffMs: 10000, timeoutMs: 900000 },
   [JOB.OPPORTUNITY_WATCHES]: { attempts: 3, backoffMs: 10000, timeoutMs: 120000 },
+  [JOB.MAILBOX_SYNC]: { attempts: 2, backoffMs: 30000, timeoutMs: 240000 },
+  [JOB.NOTIFICATION_EMAILS]: { attempts: 2, backoffMs: 30000, timeoutMs: 240000 },
   // A redelivery resumes at the first unfinished stage and re-reads recorded Apify runs, so retrying is not re-buying.
   [JOB.OPPORTUNITY_ENRICHMENT]: { attempts: 2, backoffMs: 15000, timeoutMs: 1500000 },
   [JOB.RESCORE_WORKSPACE]: { attempts: 3, backoffMs: 5_000, timeoutMs: 300_000 },
@@ -122,6 +130,8 @@ export const JOB_POLICY: Record<
  */
 export const JOB_SCHEDULE: Partial<Record<JobName, { cron: string; describe: string }>> = {
   [JOB.OPPORTUNITY_WATCHES]: { cron: "15 * * * *", describe: "Hourly — enqueue due saved opportunity searches without overlapping cadence windows." },
+  [JOB.NOTIFICATION_EMAILS]: { cron: "*/5 * * * *", describe: "Every five minutes — a hot lead or an approval waiting is worth knowing about within minutes, and batching per run keeps it to one mail-server connection per workspace rather than one per event." },
+  [JOB.MAILBOX_SYNC]: { cron: "*/5 * * * *", describe: "Every five minutes — a reply should stop the next sequence step, and steps are spaced in days, so five minutes stops it well before it sends while keeping IMAP logins to a mail server's normal polling rate." },
   [JOB.DETECT_DEAL_RISKS]: {
     cron: "0 */2 * * *",
     describe: "Every two hours — risk flags should be fresh when someone opens the board.",
@@ -201,6 +211,8 @@ export const MANUAL_TRIGGER: Record<JobName, { allowed: true } | { allowed: fals
     [JOB.OPPORTUNITY_ACTION]: { allowed: false, because: "Requested after reviewing an opportunity." },
     [JOB.OPPORTUNITY_DISCOVERY]: { allowed: false, because: "Started from Find Opportunities." },
     [JOB.OPPORTUNITY_WATCHES]: { allowed: true },
+    [JOB.MAILBOX_SYNC]: { allowed: true },
+    [JOB.NOTIFICATION_EMAILS]: { allowed: true },
     [JOB.OPPORTUNITY_ENRICHMENT]: { allowed: false, because: "Started from an opportunity's Research, Find people, Find emails, Check emails or Enrich buttons." },
     [JOB.RESCORE_WORKSPACE]: { allowed: true },
     [JOB.DETECT_DEAL_RISKS]: { allowed: true },
@@ -243,6 +255,8 @@ export const JOB_LABEL: Record<JobName, string> = {
   [JOB.OPPORTUNITY_ACTION]: "Enrich or research opportunity",
   [JOB.OPPORTUNITY_DISCOVERY]: "Discover opportunities",
   [JOB.OPPORTUNITY_WATCHES]: "Refresh opportunity watches",
+  [JOB.MAILBOX_SYNC]: "Read replies from connected mailboxes",
+  [JOB.NOTIFICATION_EMAILS]: "Email notifications",
   [JOB.OPPORTUNITY_ENRICHMENT]: "Enrich an opportunity",
   [JOB.RESCORE_WORKSPACE]: "Rescore all leads",
   [JOB.RESCORE_LEAD]: "Rescore one lead",

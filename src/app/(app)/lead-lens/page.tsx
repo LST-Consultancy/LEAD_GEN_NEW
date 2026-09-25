@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/context";
-import { hasIngestionSource } from "@/lib/ingest/sources";
+import { leadLensReadiness } from "@/lib/services/lead-lens";
 import { LeadLensView } from "@/components/intelligence/lead-lens-view";
 
 export const metadata: Metadata = { title: "Lead Lens" };
 
 export default async function LeadLensPage() {
-  await requireAuth();
-  return <LeadLensView enrichmentAvailable={hasIngestionSource()} />;
+  const ctx = await requireAuth();
+  return <LeadLensView readiness={await leadLensReadiness(ctx)} />;
 }

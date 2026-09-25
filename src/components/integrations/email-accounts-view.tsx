@@ -1,5 +1,7 @@
 "use client";
 
+import type * as React from "react";
+
 import Link from "next/link";
 import { AlertTriangle, Check, Inbox, Info, Mail, Shield, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +26,7 @@ export function EmailAccountsView({
   canReceive,
   reach,
   domainChecks,
+  children,
 }: {
   providers: (ProviderDescriptor & { adapterBuilt: boolean })[];
   active: string | null;
@@ -32,6 +35,8 @@ export function EmailAccountsView({
   canReceive: boolean;
   reach: ChannelReach;
   domainChecks: { record: string; purpose: string; failureMode: string }[];
+  /** Rendered under the sending status: the reply-reading mailboxes. */
+  children?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -48,15 +53,15 @@ export function EmailAccountsView({
         canReceive ? (
           <div className="rounded-lg border border-success-border bg-success-subtle px-3 py-2.5 text-xs text-success-text">
             <Check className="mr-1 inline size-3.5" />
-            <strong>{active}</strong> is connected and sending. It can read replies too, so
-            stop-on-reply is honoured automatically.
+            <strong>{active}</strong> is connected and sending, and a connected mailbox reads
+            replies, so stop-on-reply is honoured automatically.
           </div>
         ) : (
           <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">
             <AlertTriangle className="mr-1 inline size-3.5" />
-            <strong>{active}</strong> is sending, but cannot read replies. Enrolling leads stays
-            blocked until a mailbox that reads is connected — a sequence that keeps emailing
-            someone who already answered is the fastest way to lose them.
+            <strong>{active}</strong> is sending, but no mailbox is read for replies. Enrolling into
+            stop-on-reply sequences stays blocked until one is connected under Reply reading above —
+            a sequence that keeps emailing someone who already answered is the fastest way to lose them.
           </div>
         )
       ) : active ? (
@@ -77,6 +82,8 @@ export function EmailAccountsView({
           SMTP and Resend adapters are built and tested.
         </div>
       )}
+
+      {children}
 
       <Card>
         <CardHeader className="flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">

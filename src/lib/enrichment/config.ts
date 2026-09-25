@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fallbackConfigSchema } from "./fallback";
 
 /**
  * Apify enrichment settings. Every Actor reference and limit is configurable; the defaults are the
@@ -33,6 +34,7 @@ export const enrichmentConfigSchema = z.object({
   maxUsdPerRun: z.number().min(0.05).max(50).default(1),
   runTimeoutSec: z.number().int().min(60).max(600).default(240),
   searchCountry: z.string().regex(/^[a-z]{2}$/).optional(),
+  fallback: fallbackConfigSchema.default({ enabled: false, order: ["signalhire", "hunter", "apollo"], maxLookupsPerRun: 5 }),
   autoEnrich: z.object({ enabled: z.boolean().default(false), minIntent: z.number().int().min(0).max(100).default(60), maxPerDay: z.number().int().min(1).max(100).default(5) }).default({ enabled: false, minIntent: 60, maxPerDay: 5 }),
 });
 export type EnrichmentConfig = z.infer<typeof enrichmentConfigSchema>;

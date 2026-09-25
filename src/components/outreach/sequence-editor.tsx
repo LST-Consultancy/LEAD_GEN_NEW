@@ -132,7 +132,7 @@ export function SequenceEditor({ initial }: { initial: SequenceDraft }) {
           </div>
           <label className="flex items-center gap-2 text-xs text-secondary"><input type="checkbox" checked={stopOnReply} onChange={(e) => setStopOnReply(e.target.checked)} />Stop when they reply</label>
           <label className="flex items-center gap-2 text-xs text-secondary"><input type="checkbox" checked={stopOnUnsubscribe} onChange={(e) => setStopOnUnsubscribe(e.target.checked)} />Stop when they unsubscribe</label>
-          {stopOnReply ? <p className="text-2xs text-muted sm:col-span-2">Replies are not read from the mailbox automatically yet, so a stop-on-reply sequence can be built and previewed here but cannot be activated or enrolled until a reply reader is connected. A reply you log on a lead does stop it.</p> : null}
+          {stopOnReply ? <p className="text-2xs text-muted sm:col-span-2">Stopping on reply needs a mailbox connected for reading replies (Settings → Email Accounts → Reply reading). Without one, this sequence can be built and previewed but not activated or enrolled into. A reply you log on a lead also stops it.</p> : null}
         </CardContent>
       </Card>
 

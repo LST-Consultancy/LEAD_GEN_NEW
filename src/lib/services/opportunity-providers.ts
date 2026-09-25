@@ -9,6 +9,7 @@ import { encryptCredential, decryptCredential } from "@/lib/providers/credential
 import { discoveryProvider, providerConfigSchema } from "@/lib/providers/discovery";
 import { getWorkerReadiness } from "@/lib/queue/producer";
 import { enrichmentConfigSchema } from "@/lib/enrichment/config";
+import { isApifyPlatform, platformConfigSchema } from "@/lib/opportunities/apify-platforms";
 const ENRICHMENT_PROVIDER = "apify_enrichment";
 import { toPlain } from "@/lib/serialize";
 
@@ -23,12 +24,12 @@ export async function connectOpportunityProvider(ctx: AuthContext, provider: str
   if (!descriptor?.implemented) throw new MutationError(descriptor?.description ?? "Unknown provider.", "capability_unavailable", 422);
   const parsed = connectionSchema.parse(raw);
   // Each provider's settings are validated by its own schema, so one provider's fields are never stripped as another's.
-  const input = { ...parsed, config: provider === ENRICHMENT_PROVIDER ? enrichmentConfigSchema.parse(parsed.config ?? {}) : providerConfigSchema.parse(parsed.config ?? {}) };
+  const input = { ...parsed, config: provider === ENRICHMENT_PROVIDER ? enrichmentConfigSchema.parse(parsed.config ?? {}) : isApifyPlatform(provider) ? platformConfigSchema.parse(parsed.config ?? {}) : providerConfigSchema.parse(parsed.config ?? {}) };
   if (input.enabled && ["greenhouse", "lever", "ashby"].includes(provider) && !(input.config as { boards: unknown[] }).boards.length) throw new MutationError("Add at least one company job board.", "configuration_required", 422);
   if (input.enabled && provider === "adzuna" && (!(input.config as { appId: string }).appId || !(input.config as { countries: string[] }).countries.length)) throw new MutationError("Adzuna requires an application ID and at least one job market.", "configuration_required", 422);
   const existing = await db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId: ctx.workspaceId, provider } } });
-  const sharedApify = provider === ENRICHMENT_PROVIDER && Boolean((await db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId: ctx.workspaceId, provider: "linkedin_posts" } } }))?.encryptedCredentials);
-  if (descriptor.key && !input.apiKey && !existing?.encryptedCredentials && !sharedApify) throw new MutationError(provider === ENRICHMENT_PROVIDER ? "Enter an Apify API token, or save one on the LinkedIn posts connection first." : "Supply the provider API key.", "credentials_required", 422);
+  const sharedApify = (provider === ENRICHMENT_PROVIDER || isApifyPlatform(provider)) && Boolean(await db.providerConnection.findFirst({ where: { workspaceId: ctx.workspaceId, provider: { in: ["linkedin_posts", ENRICHMENT_PROVIDER] }, encryptedCredentials: { not: null } } }));
+  if (descriptor.key && !input.apiKey && !existing?.encryptedCredentials && !sharedApify) throw new MutationError(provider === ENRICHMENT_PROVIDER ? "Enter an Apify API token, or save one on the LinkedIn posts connection first." : isApifyPlatform(provider) ? "Enter an Apify API token, or save one on the LinkedIn posts connection first; this platform uses the same Apify account." : "Supply the provider API key.", "credentials_required", 422);
   const { apiKey, ...settings } = input;
   return mutate(ctx, PERMISSIONS.API_KEYS_MANAGE, async () => {
     const data = { ...settings, status: "UNTESTED", ...(apiKey ? { encryptedCredentials: encryptCredential(apiKey, ctx.workspaceId, provider) } : {}) };
@@ -44,11 +45,27 @@ export async function testOpportunityProvider(ctx: AuthContext, provider: string
     try {
       if (provider === "signalhire") { const { signalHireProvider } = await import("@/lib/providers/signalhire"); result = await signalHireProvider(ctx.workspaceId, decryptCredential(row.encryptedCredentials!, ctx.workspaceId, provider)).healthCheck(); }
       else if (provider === ENRICHMENT_PROVIDER) { const { checkEnrichmentAccess } = await import("./enrichment-access"); result = await checkEnrichmentAccess(ctx.workspaceId); }
+      else if (isApifyPlatform(provider)) { const { checkApifyPlatform } = await import("./apify-platform-access"); result = await checkApifyPlatform(ctx.workspaceId, provider, row.config); }
+      else if (provider === "apollo") { const { apolloProvider } = await import("@/lib/providers/apollo"); result = await apolloProvider(ctx.workspaceId, decryptCredential(row.encryptedCredentials!, ctx.workspaceId, provider)).healthCheck(); }
       else if (provider === "hunter") { const { hunterProvider } = await import("@/lib/providers/hunter"); result = await hunterProvider(ctx.workspaceId, decryptCredential(row.encryptedCredentials!, ctx.workspaceId, provider)).healthCheck(); }
       else result = await discoveryProvider(ctx.workspaceId, provider, providerConfigSchema.parse(row.config), row.encryptedCredentials ? decryptCredential(row.encryptedCredentials, ctx.workspaceId, provider) : undefined).healthCheck();
     } catch { result = { ok: false, message: "Provider test failed. Check credentials, permitted capabilities and quota." }; }
     await db.providerConnection.update({ where: { id: row.id, workspaceId: ctx.workspaceId }, data: { status: result.ok ? "CONNECTED" : "ERROR", lastTestedAt: new Date() } });
     return { result, log: { action: "provider.tested", objectType: "ProviderConnection", objectId: row.id, after: { provider, ok: result.ok } } };
+  });
+}
+
+/**
+ * Disconnects a provider: the stored credential is erased and the connection disabled, so nothing
+ * can use it; its settings and history stay, and connecting again needs a fresh key. Data already
+ * saved from the provider is not deleted — its retention setting still applies.
+ */
+export async function disconnectOpportunityProvider(ctx: AuthContext, provider: string) {
+  assertPermission(ctx, PERMISSIONS.API_KEYS_MANAGE);
+  const row = await loadScoped(() => db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId: ctx.workspaceId, provider } } }), "That provider connection");
+  return mutate(ctx, PERMISSIONS.API_KEYS_MANAGE, async () => {
+    await db.providerConnection.update({ where: { id: row.id, workspaceId: ctx.workspaceId }, data: { encryptedCredentials: null, enabled: false, status: "DISCONNECTED" } });
+    return { result: { status: "DISCONNECTED", note: provider === "linkedin_posts" ? "Disconnected. The Apify token is erased; Apify enrichment stops too unless it has its own token." : "Disconnected. The saved key is erased and nothing will use this provider until it is connected again. Data already saved from it is kept under its retention setting." }, log: { action: "provider.disconnected", objectType: "ProviderConnection", objectId: row.id, before: { enabled: row.enabled, hadKey: Boolean(row.encryptedCredentials) }, after: { enabled: false, hadKey: false } } };
   });
 }
 

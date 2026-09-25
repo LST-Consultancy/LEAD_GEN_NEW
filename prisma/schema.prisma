@@ -405,6 +405,10 @@ model Workspace {
   deletedRecords      DeletedRecord[]
 
   @@index([deletedAt])
+  offeringProfiles OfferingProfile[]
+  externalLookups ExternalLookup[]
+  mailboxes        Mailbox[]
+  calendarConnections CalendarConnection[]
 }
 
 model Role {
@@ -434,6 +438,12 @@ model WorkspaceMember {
   title         String?
   isDefault     Boolean   @default(false)
   dailyPointCap Int?
+  /// What this person can take on in delivery plans, e.g. "netsuite", "integration", "qa".
+  skills        String[]  @default([])
+  /// How many open plan steps they can carry at once; null means no limit is set.
+  stepCapacity  Int?
+  /// Away (leave, fully booked) — not offered new steps while set.
+  isAway        Boolean   @default(false)
   invitedAt     DateTime?
   joinedAt      DateTime  @default(now())
   createdAt     DateTime  @default(now())
@@ -587,7 +597,7 @@ model Company {
   foundedYear       Int?
   city              String?
   state             String?
-  country           String    @default("India")
+  country           String    @default("Unknown")
   technologies      String[]
   tags              String[]
   intentScore       Int       @default(0)
@@ -637,7 +647,7 @@ model Person {
   avatarUrl   String?
   city        String?
   state       String?
-  country     String    @default("India")
+  country     String    @default("Unknown")
   languages   String[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -897,6 +907,8 @@ model SearchPhrase {
   cadenceHours     Int              @default(24)
   negativeKeywords String[]
   createdByAi      Boolean          @default(false)
+  /// The member a scheduled run acts as; older phrases fall back to a member who can run discovery.
+  createdById      String?          @db.Uuid
   lastRunAt        DateTime?
   nextRunAt        DateTime?
   createdAt        DateTime         @default(now())
@@ -1605,6 +1617,8 @@ model CommitteeMember {
   influence     Int           @default(50)
   sentiment     String?
   note          String?
+  /// Taken off the committee by a person; kept so the history of who was mapped is not rewritten.
+  removedAt     DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -1915,6 +1929,10 @@ model Notification {
   leadId      String?          @db.Uuid
   dealId      String?          @db.Uuid
   readAt      DateTime?
+  /// Email delivery: when it was claimed for sending, when it went, and why it did not.
+  emailClaimedAt DateTime?
+  emailedAt   DateTime?
+  emailError  String?
   createdAt   DateTime         @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -2205,6 +2223,8 @@ model OpportunitySearch {
   found           Int                       @default(0)
   qualified       Int                       @default(0)
   savedSearchId   String?                   @db.Uuid
+  /// Set when a watched search phrase ran this search, so its matches are attributed to the phrase.
+  searchPhraseId  String?                   @db.Uuid
   idempotencyKey  String
   /// Depth, target, budget and edited queries chosen for this run (lib/opportunities/linkedin-plan.ts).
   options         Json                      @default("{}")
@@ -2322,6 +2342,9 @@ model Invitation {
   acceptedAt  DateTime?
   acceptedBy  String?   @db.Uuid
   revokedAt   DateTime?
+  /// When the invitation link was emailed, and why it was not when that failed.
+  emailedAt   DateTime?
+  emailError  String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -2388,6 +2411,8 @@ model NotificationPreference {
   userId      String           @db.Uuid
   kind        NotificationKind
   inApp       Boolean          @default(true)
+  /// Also email this kind to the person. Off unless they turn it on.
+  email       Boolean          @default(false)
   updatedAt   DateTime         @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -2429,6 +2454,8 @@ model DealPlanStep {
   dependsOn           String[]
   isClientGate        Boolean   @default(false)
   status              String    @default("todo")
+  /// The skill a person needs to own this step; routing only offers people who have it.
+  requiredSkill       String?
   ownerId             String?   @db.Uuid
   artifact            String?
   note                String?
@@ -2473,6 +2500,10 @@ model CompanyContactPoint {
   value              String
   /// A role address (info@, sales@) rather than one that names a person.
   isGeneric          Boolean   @default(true)
+  /// matched (website domain) · alias (corroborated email domain) · review (unresolved) · rejected (a person said not the company's) · free (free mailbox).
+  domainStatus       String    @default("matched")
+  /// A saved person this address may belong to, inferred from their name but not strong enough to attach.
+  possiblePersonId   String?   @db.Uuid
   source             String
   evidence           Json      @default("{}")
   verificationResult String    @default("UNCHECKED")
@@ -2538,4 +2569,108 @@ model ApifyRun {
 
   @@unique([workspaceId, enrichmentRunId, stageKey])
   @@index([workspaceId, actorId, inputHash])
+}
+
+/// What the workspace sells, described so discovery can ask each platform the right way: buyer
+/// phrases for request platforms, the job titles a company posts when it needs this for job boards,
+/// and business categories for Maps. Fit criteria (industries, size, locations) stay separate from
+/// the intent phrases, because they answer different questions.
+model OfferingProfile {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @db.Uuid
+  name               String
+  description        String    @default("")
+  services           String[]
+  technologies       String[]
+  buyerPhrases       String[]
+  jobTitles          String[]
+  prospectCategories String[]
+  industries         String[]
+  locations          String[]
+  employeeMin        Int?
+  employeeMax        Int?
+  negativeKeywords   String[]
+  platforms          String[]
+  createdById        String?   @db.Uuid
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, deletedAt])
+}
+
+/// One external lookup from Lead Lens: what was asked, which provider answered, and what was saved.
+/// Doubles as the cache — a found result inside the freshness window is shown again, not bought again.
+model ExternalLookup {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @db.Uuid
+  requestedById String?   @db.Uuid
+  kind          String
+  target        String
+  targetKey     String
+  provider      String?
+  status        String    @default("RUNNING")
+  personId      String?   @db.Uuid
+  companyId     String?   @db.Uuid
+  candidates    Json      @default("[]")
+  note          String?
+  createdAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, targetKey, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+/// A workspace mailbox whose replies are read over IMAP, so stop-on-reply is automatic. The password
+/// is encrypted with the provider key and never returned. Revoking erases it and stops reading.
+model Mailbox {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  label             String
+  address           String
+  imapHost          String
+  imapPort          Int       @default(993)
+  imapSecure        Boolean   @default(true)
+  imapUser          String
+  encryptedPassword String?
+  folder            String    @default("INBOX")
+  status            String    @default("UNTESTED")
+  lastError         String?
+  lastTestedAt      DateTime?
+  uidValidity       String?
+  lastUid           Int       @default(0)
+  lastSyncedAt      DateTime?
+  repliesMatched    Int       @default(0)
+  createdById       String?   @db.Uuid
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, address])
+  @@index([workspaceId, status])
+}
+
+/// One person's calendar, connected over OAuth so bookings create, move and cancel real events.
+/// Tokens are encrypted and never returned; revoking tells the provider and erases them.
+model CalendarConnection {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @db.Uuid
+  userId          String    @db.Uuid
+  provider        String
+  email           String?
+  calendarId      String    @default("primary")
+  encryptedTokens String?
+  scopes          String[]
+  status          String    @default("CONNECTED")
+  lastError       String?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId, provider])
 }

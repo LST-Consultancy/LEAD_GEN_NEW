@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { ProviderRequestError } from "./provider-errors";
 export { ProviderRequestError };
 // Fixed documented vendor hosts only. Arbitrary URLs, redirects and crawler requests are refused.
-const HOSTS = new Set(["api.search.brave.com", "boards-api.greenhouse.io", "api.lever.co", "api.hunter.io", "api.adzuna.com", "api.ashbyhq.com", "www.signalhire.com", "api.apify.com"]);
+const HOSTS = new Set(["api.search.brave.com", "boards-api.greenhouse.io", "api.lever.co", "api.hunter.io", "api.adzuna.com", "api.ashbyhq.com", "www.signalhire.com", "api.apify.com", "api.apollo.io", "graph.facebook.com", "oauth2.googleapis.com", "www.googleapis.com", "api.openai.com"]);
 export function validateProviderUrl(raw: string) {
   const u = new URL(raw);
   if (u.protocol !== "https:" || !HOSTS.has(u.hostname) || u.port || u.username || u.password) throw new Error("Provider destination is not permitted.");
@@ -14,9 +14,10 @@ export function validateProviderUrl(raw: string) {
 }
 // Apify's own API allows far more than a search board does, and one LinkedIn page costs a start,
 // a poll or two and a dataset read, so the default 20/minute would stall a two-page search.
-const LIMITS: Record<string, [number, number][]> = { linkedin_posts: [[60, 60], [3600, 1000], [86400, 5000]], apify_enrichment: [[60, 60], [3600, 1000], [86400, 5000]] };
+const APIFY_LIMITS: [number, number][] = [[60, 60], [3600, 1000], [86400, 5000]];
+const LIMITS: Record<string, [number, number][]> = Object.fromEntries(["linkedin_posts", "apify_enrichment", "apify_linkedin_jobs", "apify_indeed", "apify_naukri", "apify_google_search", "apify_reddit", "apify_upwork", "apify_google_maps", "apify_websites"].map(p => [p, APIFY_LIMITS]));
 const DEFAULT_LIMITS: [number, number][] = [[60, 20], [3600, 300], [86400, 1500]];
-export async function providerJson(workspaceId: string, provider: string, url: string, headers: Record<string, string> = {}, body?: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<unknown> {
+export async function providerJson(workspaceId: string, provider: string, url: string, headers: Record<string, string> = {}, body?: Record<string, unknown>, opts: { timeoutMs?: number; form?: boolean; method?: "PATCH" | "DELETE" | "POST" } = {}): Promise<unknown> {
   const timeoutMs = opts.timeoutMs ?? 15000;
   const u = validateProviderUrl(url);
   const redis = getRedis();
@@ -24,7 +25,7 @@ export async function providerJson(workspaceId: string, provider: string, url: s
   const lockKey = `provider-lock:${workspaceId}:${provider}`; const token = randomUUID();
   if (await redis.set(lockKey, token, "EX", Math.max(120, Math.ceil(timeoutMs / 1000) + 30), "NX") !== "OK") throw new ProviderRequestError("Another request to this provider is active. Retry shortly.", "busy");
   try {
-    for (let attempt = 0; attempt < (body ? 1 : 3); attempt++) {
+    for (let attempt = 0; attempt < (body || opts.method ? 1 : 3); attempt++) {
       for (const [windowSeconds, limit] of LIMITS[provider] ?? DEFAULT_LIMITS) {
         const result = await rateLimit("write", `provider:${workspaceId}:${provider}:${windowSeconds}`, { windowSeconds, limit });
         if (!result.allowed || result.degraded) throw new ProviderRequestError("Provider request limit reached or shared limiter unavailable. Try later.", "rate_limited", null, result.degraded ? null : windowSeconds);
@@ -32,12 +33,16 @@ export async function providerJson(workspaceId: string, provider: string, url: s
       const request = await db.providerSync.create({ data: { workspaceId, provider, operation: "http_request", state: "RUNNING", requests: 1 } });
       let response: Response;
       try {
-        response = await fetch(u, { method: body ? "POST" : "GET", body: body ? JSON.stringify(body) : undefined, headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}), ...headers }, redirect: "error", signal: AbortSignal.timeout(timeoutMs), cache: "no-store" });
+        const encoded = body ? (opts.form ? new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)])).toString() : JSON.stringify(body)) : undefined;
+        response = await fetch(u, { method: opts.method ?? (body ? "POST" : "GET"), body: encoded, headers: { Accept: "application/json", ...(body ? { "Content-Type": opts.form ? "application/x-www-form-urlencoded" : "application/json" } : {}), ...headers }, redirect: "error", signal: AbortSignal.timeout(timeoutMs), cache: "no-store" });
         if (response.ok) {
+          if (response.status === 204) { await db.providerSync.update({ where: { id: request.id, workspaceId }, data: { state: "COMPLETED", finishedAt: new Date() } }); return {}; }
           const reader = response.body?.getReader(); if (!reader) throw new Error("Empty provider response.");
           let size = 0; const chunks: Uint8Array[] = [];
           while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength; if (size > 5_000_000) { await reader.cancel(); throw new Error("Provider response exceeded the size limit."); } chunks.push(chunk.value); }
-          const data: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          const text = Buffer.concat(chunks).toString("utf8");
+          // A 204 (a deleted calendar event, a revoked token) has no body to parse.
+          const data: unknown = text.trim() ? JSON.parse(text) : {};
           await db.providerSync.update({ where: { id: request.id, workspaceId }, data: { state: "COMPLETED", finishedAt: new Date() } });
           return data;
         }

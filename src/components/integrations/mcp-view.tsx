@@ -72,16 +72,20 @@ export function McpView({
           tools, their risk classes, the scope model and key authentication. The remaining work
           is the transport, not the permission model.
         </div>
-      ) : null}
+      ) : (
+        <div className="space-y-1 rounded-lg border border-border px-3 py-2.5 text-xs text-secondary">
+          <p><strong className="text-primary">The MCP server is running</strong> at <code className="font-mono text-primary">{baseUrl}/api/mcp</code> (Streamable HTTP, JSON-RPC 2.0).</p>
+          <p>Authenticate with a workspace API key holding <code className="font-mono">insights.read</code>, sent as <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>. Only the read-only tools below are offered; tools that change data or spend credits stay in Autopilot, where approvals apply.</p>
+          <pre className="overflow-x-auto rounded bg-surface-sunken p-2 font-mono text-2xs">{`claude mcp add --transport http signalroom ${baseUrl}/api/mcp --header "Authorization: Bearer <key>"`}</pre>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>What a client would get</CardTitle>
+            <CardTitle>What a client gets</CardTitle>
             <p className="mt-0.5 text-2xs text-muted">
-              {built.length} of {tools.length} tools are built. An MCP server would advertise only
-              these, because advertising a tool that does nothing is worse than not advertising
-              it.
+              {built.filter((t) => t.riskClass === "READ").length} read-only tools are served over MCP. The rest are listed for reference: WRITE and SPEND tools run only in Autopilot, and tools marked not built are never advertised.
             </p>
           </div>
         </CardHeader>
@@ -119,7 +123,7 @@ export function McpView({
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>How access would work</CardTitle>
+            <CardTitle>How access works</CardTitle>
             <p className="mt-0.5 text-2xs text-muted">
               The same scopes an API key uses. A client is never more privileged than the key it
               presents, and that key is never more privileged than the person who created it.

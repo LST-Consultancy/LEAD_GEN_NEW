@@ -90,8 +90,8 @@ describe("recording a meeting", () => {
     const { lead } = await makeLead(workspace.id, { ownerId: ctx.userId });
 
     const result = await createBooking(ctx, input({ leadId: lead.id }));
-    expect(result.note).toMatch(/No invite was sent/);
-    expect(result.note).toMatch(/no calendar event was created/);
+    expect(result.note).toMatch(/no invite was sent/i);
+    expect(result.note).toMatch(/no event was created/);
   });
 
   it("leaves the provider null rather than implying an integration", async () => {

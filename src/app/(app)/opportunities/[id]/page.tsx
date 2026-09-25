@@ -8,15 +8,17 @@ import { PlainMarkdown } from "@/components/ui/plain-markdown";
 import { MutationError } from "@/lib/services/mutate";
 import { EnrichmentPanel } from "@/components/opportunities/enrichment-panel";
 import { BUYER_ATTRIBUTION_LABEL } from "@/lib/vocab";
+import { getOpportunityReadiness } from "@/lib/services/opportunity-readiness";
 export default async function OpportunityPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireAuth(); const { id } = await params;
   const o = await getOpportunity(ctx,id).catch(e => { if (e instanceof MutationError && e.status === 404) notFound(); throw e; });
-  const enrichment = await getOpportunityEnrichment(ctx, id);
+  const [enrichment, readiness] = await Promise.all([getOpportunityEnrichment(ctx, id), getOpportunityReadiness(ctx, id)]);
   const can = (p: string) => ctx.permissions.includes(p);
   return <div className="mx-auto max-w-6xl space-y-6 p-6"><Link href="/opportunities" className="text-sm underline">All opportunities</Link><header><p className="text-secondary">{o.company.name} · {o.company.domain ?? "Domain unknown"}</p><h1 className="mt-1 text-3xl font-semibold">{o.title}</h1><p className="mt-2">{o.types.join(" · ").replaceAll("_", " ")}</p></header>
     <div className="grid gap-3 sm:grid-cols-4">{[["Intent", o.intentScore], ["Opportunity score", o.opportunityScore], ["Fit", o.fitScore], ["Status", o.status], ["Posted", o.postedAt?.slice(0,10) ?? "Unknown"], ["First discovered", o.discoveredAt.slice(0,10)], ["Last checked", o.lastCheckedAt.slice(0,10)], ["Last changed", o.lastChangedAt?.slice(0,10) ?? "No changes recorded"]].map(([label,value]) => <div key={label} className="rounded-xl border border-border bg-surface p-4"><p className="text-xs text-secondary">{label}</p><p className="mt-1 font-semibold">{value}</p></div>)}</div>
     <p className="text-xs text-secondary">Status is the opportunity&apos;s own requirement status from its source. Researching or enriching the company never changes it.</p>
-    <EnrichmentPanel opportunityId={id} initial={enrichment} canResearch={can(PERMISSIONS.LEADS_EDIT)} canReveal={can(PERMISSIONS.LEADS_REVEAL)} canConvert={can(PERMISSIONS.LEADS_EDIT)} />
+    <ReadinessStrip readiness={readiness} />
+    <EnrichmentPanel opportunityId={id} opportunityTitle={o.title} initial={enrichment} canResearch={can(PERMISSIONS.LEADS_EDIT)} canReveal={can(PERMISSIONS.LEADS_REVEAL)} canConvert={can(PERMISSIONS.LEADS_EDIT)} />
     <section className="rounded-xl border border-border p-5"><h2 className="font-semibold">Why this matters</h2>{o.summary ? <><PlainMarkdown text={o.summary} className="mt-2 text-sm" /><p className="mt-2 text-xs text-secondary">AI summary of the retrieved evidence; [S:…] and [F:…] mark the source or company field it relies on.</p></> : <p className="mt-2 text-sm">{o.types.includes("INTERNAL_HIRING") ? "This company has an internal hiring requirement. The evidence does not by itself establish demand for an external service provider." : "This is a potential opportunity based on the source requirement. Review the evidence and current status before contacting anyone."}</p>}</section>
     <section><h2 className="mb-3 text-lg font-semibold">Evidence and intent score</h2><div className="space-y-2">{o.evidence.map(e => <div key={e.id} className="rounded border border-border p-3"><p><span className="mr-3 font-semibold">{e.scoreContribution > 0 ? "+" : ""}{e.scoreContribution}</span>{e.description}</p><a href={e.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline">{e.source} · View original evidence</a><p className="text-xs text-secondary">Occurred: {e.occurredAt?.slice(0,10) ?? "Unknown"} · Discovered: {e.discoveredAt.slice(0,10)} · Confidence: {e.confidence}%</p></div>)}</div></section>
     <section><h2 className="text-lg font-semibold">Sources</h2>{o.sources.map(s => <article key={s.id} className="mt-3 rounded border border-border p-4"><a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">{s.title} · {s.provider}</a><p className="mt-2 text-sm text-secondary">{s.description.slice(0,1800)}</p><BuyerAttributionNote reference={s.rawReference} /><p className="mt-2 text-xs">Source reference: {s.id} · Posted: {s.postedAt?.slice(0,10) ?? "Unknown"}</p></article>)}</section>
@@ -36,4 +38,17 @@ function BuyerAttributionNote({ reference }: { reference: unknown }) {
     {a?.method && BUYER_ATTRIBUTION_LABEL[a.method] && <p>{BUYER_ATTRIBUTION_LABEL[a.method]}</p>}
     {a?.quote && <blockquote className="italic">“{a.quote}”</blockquote>}
   </div>;
+}
+
+function ReadinessStrip({ readiness }: { readiness: Awaited<ReturnType<typeof getOpportunityReadiness>> }) {
+  const { fit, stages } = readiness;
+  return <section aria-label="Readiness" className="space-y-3 rounded-xl border border-border p-4">
+    <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{stages.map(s => <li key={s.key} className="min-w-0 rounded border border-border p-3">
+      <p className="text-sm font-medium"><span aria-hidden className={s.done ? "text-success-text" : "text-secondary"}>{s.done ? "✓" : "○"}</span> {s.label} <span className="sr-only">{s.done ? "done" : "not yet"}</span></p>
+      <p className="mt-1 text-xs text-secondary">{s.detail}</p></li>)}</ol>
+    <div className="rounded border border-border p-3 text-sm">
+      <p><span className="font-medium">Fit</span> · {fit.headline}</p>
+      {fit.lines.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-secondary">{fit.lines.map((l, i) => <li key={i} className="tabular-nums">{l.points > 0 ? "+" : ""}{l.points} {l.label}</li>)}</ul>}
+    </div>
+  </section>;
 }

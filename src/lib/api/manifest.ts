@@ -26,6 +26,13 @@ export type Endpoint = {
 export const ENDPOINTS: Endpoint[] = [
   // ---- Wired for API keys --------------------------------------------
   {
+    method: "POST",
+    path: "/api/mcp",
+    summary: "Model Context Protocol (Streamable HTTP, JSON-RPC 2.0): initialize, tools/list and tools/call for the read-only Copilot tools.",
+    scope: "insights.read",
+    keyAuth: true,
+  },
+  {
     method: "GET",
     path: "/api/leads/{id}",
     summary: "One lead with its score, evidence and contacts.",

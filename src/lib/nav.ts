@@ -541,6 +541,16 @@ export const NAV: NavGroup[] = [
         keywords: ["ideal customer", "targeting", "fit"],
       },
       {
+        key: "offerings",
+        label: "Offerings",
+        href: "/settings/offerings",
+        icon: Crosshair,
+        status: "live",
+        phase: "Opportunity intelligence",
+        purpose: "Describe what you sell so discovery asks each platform the right way: buyer phrases, job titles and business categories.",
+        keywords: ["offering", "products", "services", "discovery", "phrases", "routing"],
+      },
+      {
         key: "team-roles",
         label: "Team & Roles",
         href: "/settings/team",

@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Notifications" };
 
 export default async function NotificationSettingsPage() {
   const ctx = await requireAuth();
-  const { kinds, windowDays, totalReceived, totalUnread } = await getNotificationSettings(ctx);
+  const { kinds, windowDays, totalReceived, totalUnread, emailAvailable, emailAddress } = await getNotificationSettings(ctx);
 
   return (
     <NotificationsSettingsView
@@ -15,6 +15,8 @@ export default async function NotificationSettingsPage() {
       windowDays={windowDays}
       totalReceived={totalReceived}
       totalUnread={totalUnread}
+      emailAvailable={emailAvailable}
+      emailAddress={emailAddress}
     />
   );
 }

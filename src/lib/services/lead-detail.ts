@@ -108,7 +108,7 @@ export async function getLeadDossier(ctx: AuthContext, leadId: string) {
   });
 
   const committee = await db.committeeMember.findMany({
-    where: { workspaceId: ctx.workspaceId, companyId: lead.companyId },
+    where: { workspaceId: ctx.workspaceId, companyId: lead.companyId, removedAt: null },
     select: { personId: true, role: true, influence: true, confirmedAt: true, isAiSuggested: true },
   });
   const committeeByPerson = new Map(committee.map((c) => [c.personId, c]));

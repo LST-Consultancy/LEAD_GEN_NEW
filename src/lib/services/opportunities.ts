@@ -21,7 +21,7 @@ export function opportunityReadPermission(ctx: AuthContext) {
   if (!ctx.permissions.includes(PERMISSIONS.LEADS_VIEW_ALL)) assertPermission(ctx, PERMISSIONS.LEADS_VIEW_OWN);
 }
 // Company opportunity evidence is workspace intelligence, like existing company signals.
-export const searchInputSchema = z.object({ query: z.string().trim().min(3).max(2000), providers: z.array(z.enum(DISCOVERY_PROVIDERS)).min(1).max(5), criteria: criteriaSchema.optional(), options: discoveryOptionsSchema.optional(), idempotencyKey: z.string().uuid() });
+export const searchInputSchema = z.object({ query: z.string().trim().min(3).max(2000), providers: z.array(z.enum(DISCOVERY_PROVIDERS)).min(1).max(14), criteria: criteriaSchema.optional(), options: discoveryOptionsSchema.optional(), idempotencyKey: z.string().uuid() });
 export async function startOpportunitySearch(ctx: AuthContext, raw: unknown) {
   assertPermission(ctx, PERMISSIONS.LEADS_EDIT);
   const input = searchInputSchema.parse(raw);
@@ -149,11 +149,33 @@ export async function opportunityPeople(ctx: AuthContext, companyId: string) {
   const blocked = new Set(suppressed.map(s => s.value.toLowerCase()));
   return toPlain(rows.map(e => ({ ...e, person: { ...e.person, contactMethods: e.person.contactMethods.filter(c => !c.value || !blocked.has(c.value.toLowerCase())) } } )));
 }
+const watchInputSchema = z.object({ name: z.string().trim().min(2).max(80), criteria: criteriaSchema.optional(), options: discoveryOptionsSchema.optional(), query: z.string().min(3).max(2000), providers: z.array(z.enum(DISCOVERY_PROVIDERS)).min(1), cadenceHours: z.union([z.literal(6), z.literal(24), z.literal(72), z.literal(168)]).default(24) });
 export async function saveOpportunitySearch(ctx: AuthContext, raw: unknown) {
-  const input = z.object({ name: z.string().trim().min(2).max(80), criteria: criteriaSchema.optional(), options: discoveryOptionsSchema.optional(), query: z.string().min(3).max(2000), providers: z.array(z.enum(DISCOVERY_PROVIDERS)).min(1), cadenceHours: z.union([z.literal(6), z.literal(24), z.literal(72), z.literal(168)]).default(24) }).parse(raw);
+  const input = watchInputSchema.parse(raw);
   return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
     const saved = await db.savedSearch.create({ data: { workspaceId: ctx.workspaceId, createdById: ctx.userId, name: input.name, surface: "opportunities", filterJson: input, alertEnabled: true, frequency: input.cadenceHours === 168 ? "WEEKLY" : "DAILY" } });
     return { result: toPlain(saved), log: { action: "opportunity.watch", objectType: "SavedSearch", objectId: saved.id, after: { name: saved.name } } };
+  });
+}
+
+/** A saved opportunity watch as the search form needs it, so opening one restores what it runs. */
+export async function getOpportunityWatch(ctx: AuthContext, id: string) {
+  opportunityReadPermission(ctx);
+  if (!z.string().uuid().safeParse(id).success) return null;
+  const w = await db.savedSearch.findFirst({ where: { id, workspaceId: ctx.workspaceId, surface: "opportunities", deletedAt: null } });
+  if (!w) return null;
+  const parsed = watchInputSchema.safeParse(w.filterJson);
+  return parsed.success ? toPlain({ ...parsed.data, id: w.id, name: w.name, lastAlertAt: w.lastAlertAt }) : toPlain({ id: w.id, name: w.name, lastAlertAt: w.lastAlertAt, broken: true as const });
+}
+
+/** Changes what a watch runs, keeping its id, history and alert state. */
+export async function updateOpportunityWatch(ctx: AuthContext, id: string, raw: unknown) {
+  z.string().uuid().parse(id);
+  const input = watchInputSchema.parse(raw);
+  const before = await loadScoped(() => db.savedSearch.findFirst({ where: { id, workspaceId: ctx.workspaceId, surface: "opportunities", deletedAt: null } }), "That watch");
+  return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
+    const saved = await db.savedSearch.update({ where: { id: before.id }, data: { name: input.name, filterJson: input, frequency: input.cadenceHours === 168 ? "WEEKLY" : "DAILY" } });
+    return { result: toPlain(saved), log: { action: "opportunity.watch_updated", objectType: "SavedSearch", objectId: id, before: { filter: before.filterJson }, after: { filter: input } } };
   });
 }
 

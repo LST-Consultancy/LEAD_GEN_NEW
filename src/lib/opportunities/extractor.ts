@@ -14,7 +14,8 @@ export function sourceDate(value: unknown): string | null {
 export function plainText(value: string) { return value.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&(?:nbsp|amp|lt|gt|quot);/g, " ").replace(/\s+/g, " ").trim().slice(0, 30000); }
 export function extractOpportunity(doc: SourceDocument, criteria: SearchCriteria) {
   const text = plainText(`${doc.title}. ${doc.description}`);
-  const vendor = /(?:looking for|seeking|need|require|inviting|request for)[^.]{0,130}(?:partner|vendor|agency|consultancy|external (?:development )?team)|\brfp\b|request for proposals/i.test(text);
+  // A freelance marketplace post is, by definition, a client asking for an outside provider.
+  const vendor = doc.kind === "FREELANCE_PROJECT" || /(?:looking for|seeking|need|require|inviting|request for)[^.]{0,130}(?:partner|vendor|agency|consultancy|external (?:development )?team)|\brfp\b|request for proposals/i.test(text);
   const hiring = doc.kind === "JOB_BOARD" || /\b(?:hiring|job opening|join our team|we are recruiting)\b/i.test(text);
   const requirement = vendor || hiring || /(?:plan(?:ning)?|need|require|migrat(?:e|ing)|implement(?:ing)?)[^.]{0,100}(?:implementation|integration|migration|software|development|ERP|CRM|NetSuite|Salesforce)/i.test(text);
   const types: OpportunityType[] = [];

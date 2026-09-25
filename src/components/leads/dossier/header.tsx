@@ -227,6 +227,7 @@ export function DossierHeader({
             <StarToggle leadId={lead.id} initial={lead.isStarred} />
             {canExport ? <ExportLeadButton leadId={lead.id} /> : null}
             <Button variant="ghost" size="sm" asChild><Link href={`/print/leads/${lead.id}`}>Print</Link></Button>
+            <Button variant="ghost" size="sm" asChild><a href={`/api/leads/${lead.id}/pdf`} download>PDF</a></Button>
             <LeadLifecycleMenu
               leadId={lead.id}
               leadName={lead.person.name}

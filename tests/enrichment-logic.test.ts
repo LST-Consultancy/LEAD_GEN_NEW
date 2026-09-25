@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { companyDomain, decide, evidenceLinks, linkedInCompanyUrl, mapCompanyProfile, nameSimilarity, parseSearchItems, safePublicHost, scoreCandidate, searchCandidates } from "@/lib/enrichment/identity";
-import { assessAuthor, mapEmployee, rankPeople, roleFocus, searchQueryFor } from "@/lib/enrichment/people";
-import { extractEmails, mapWebsiteItems, ownerOf } from "@/lib/enrichment/emails";
+import { assessAuthor, mapEmployee, rankPeople, roleFocus, roleFocuses, searchQueryFor } from "@/lib/enrichment/people";
+import { classify, corroborateAlias, domainLabel, extractEmails, inferOwner, mapWebsiteItems, normalisePhone, ownerOf } from "@/lib/enrichment/emails";
+import { importRowSchema } from "@/lib/ingest/import";
 import { contactStatusFor, mapChecks } from "@/lib/enrichment/verification";
 import { freshStages, runStateOf, type Stage } from "@/lib/enrichment/stages";
 import { enrichmentConfigSchema, estimate } from "@/lib/enrichment/config";
@@ -143,5 +144,65 @@ describe("configuration", () => {
     expect(c).toMatchObject({ maxUsdPerRun: 1, autoEnrich: { enabled: false } });
     expect(() => enrichmentConfigSchema.parse({ actors: { search: "https://evil.example/actor" } })).toThrow();
     expect(estimate.employees(20, "Full ($8 per 1k)")).toBeCloseTo(0.18, 3);
+  });
+});
+
+// Shapes as the Actors actually return them (field names confirmed against recorded datasets;
+// values synthetic). The earlier mapper read `experience`/`headline`, which Short mode never sends.
+describe("contact-quality regressions (E01–E06)", () => {
+  const company = { name: "Atzean Technologies LLP", linkedinUrl: "https://www.linkedin.com/company/atzean-technologies-synthetic" };
+  const shortItem = (over: Record<string, unknown> = {}) => ({
+    firstName: "Asha", lastName: "Kulkarni", linkedinUrl: "https://www.linkedin.com/in/asha-synthetic",
+    location: { linkedinText: "Pune, Maharashtra, India" },
+    currentPositions: [{ title: "Head of Delivery", companyName: "Atzean Technologies", companyLinkedinUrl: company.linkedinUrl, current: true, startedOn: { month: 3, year: 2022 } }],
+    ...over,
+  });
+
+  it("E02: reads a current role from currentPositions and a city from linkedinText", () => {
+    const p = mapEmployee(shortItem(), company, "vendor_staffing", false);
+    expect(p).toMatchObject({ title: "Head of Delivery", association: "current" });
+    expect(p?.city ?? "").toMatch(/Pune/);
+  });
+  it("E02: a position marked current:false is former, and never ranked as a decision maker", () => {
+    const p = mapEmployee(shortItem({ currentPositions: [{ title: "Head of Delivery", companyName: "Atzean Technologies", companyLinkedinUrl: company.linkedinUrl, current: false }] }), company, "vendor_staffing", false);
+    expect(p?.association).not.toBe("current");
+    expect(p?.authority.likelyDecisionMaker ?? false).toBe(false);
+  });
+  it("E02: reads industries given as objects and a phone given as {number}", () => {
+    const profile = mapCompanyProfile({ ...COMPANY_PAGE, industries: [{ id: 96, name: "IT Services and IT Consulting", urn: "urn:li:industry:96" }], phone: { number: "+91 20 1234 5678" } });
+    expect(profile).toMatchObject({ industry: "IT Services and IT Consulting", phone: "+91 20 1234 5678" });
+  });
+  it("E03: a staffing ask that also names a technology targets both vendor and technology roles", () => {
+    const focus = roleFocuses(["INTERNAL_HIRING", "TECHNOLOGY"], "Looking for a staffing vendor to supply Java developers");
+    expect(focus).toContain("vendor_staffing");
+    expect(searchQueryFor(focus, false)).toMatch(/Partnerships|Vendor|Procurement/);
+  });
+  it("E01: keeps an address on another domain for review instead of dropping it", () => {
+    const [f] = extractEmails("write to asha@othercorp.example", "atzean.com", { kind: "source", url: null });
+    expect(f).toMatchObject({ domainStatus: "review", sameDomain: false });
+  });
+  it("E01: accepts the same name on another ending as an alias", () => {
+    expect(domainLabel("atzean.in")).toBe(domainLabel("atzean.com"));
+    expect(domainLabel("atzean.co.in")).toBe("atzean");
+    expect(corroborateAlias("atzean.in", "atzean.com", "Atzean Technologies", "source").accepted).toBe(true);
+    expect(corroborateAlias("othercorp.example", "atzean.com", "Atzean Technologies", "source").accepted).toBe(false);
+    expect(classify("asha@atzean.in", "atzean.com", { kind: "source", url: null, excerpt: null }, ["atzean.in"]).domainStatus).toBe("alias");
+  });
+  it("E05: a provider-returned role address is still generic", () => {
+    expect(classify("sales@atzean.com", "atzean.com", { kind: "provider", url: null, excerpt: null, provider: "hunter" }).generic).toBe(true);
+    expect(classify("x@gmail.com", "atzean.com", { kind: "provider", url: null, excerpt: null }).domainStatus).toBe("free");
+  });
+  it("E04: first name plus last initial is too weak to attach an address", () => {
+    const people = [{ id: "p1", fullName: "Asha Kulkarni" }];
+    expect(inferOwner("asha.kulkarni@atzean.com", people)).toEqual({ personId: "p1", strength: "full_name" });
+    expect(inferOwner("ashak@atzean.com", people)?.strength).toBe("first_last_initial");
+    expect(inferOwner("ak@atzean.com", people)).toBeNull();
+  });
+  it("E06: an imported row with no country is Unknown, not India", () => {
+    expect(importRowSchema.parse({ fullName: "Asha Kulkarni", companyName: "Synthetic Co" }).country ?? "Unknown").toBe("Unknown");
+  });
+  it("normalises a published phone and rejects fragments", () => {
+    expect(normalisePhone("+91 (20) 1234-5678")).toBe("+912012345678");
+    expect(normalisePhone("12-34")).toBeNull();
   });
 });

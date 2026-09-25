@@ -112,7 +112,7 @@ export async function getDealPlan(ctx: AuthContext, dealId: string) {
       id: plan.id, template: plan.templateKey === STANDARD_PLAN.key ? `standard v${plan.templateVersion}` : `${(await db.planTemplate.findFirst({ where: { id: plan.templateKey }, select: { name: true } }))?.name ?? "saved template"} v${plan.templateVersion}`,
       steps: plan.steps.map((s) => ({
         id: s.id, key: s.key, order: s.order, phase: s.phase, title: s.title, completionCriteria: s.completionCriteria, dependsOn: s.dependsOn,
-        isClientGate: s.isClientGate, status: s.status, owner: owners.find((o) => o.id === s.ownerId) ?? null, artifact: s.artifact, note: s.note,
+        isClientGate: s.isClientGate, status: s.status, requiredSkill: s.requiredSkill, owner: owners.find((o) => o.id === s.ownerId) ?? null, artifact: s.artifact, note: s.note,
         clientApprovedBy: s.clientApprovedBy, clientApprovedAt: s.clientApprovedAt?.toISOString() ?? null, completedAt: s.completedAt?.toISOString() ?? null,
         waitingOn: waitingOn(s, plan.steps).map((k) => plan.steps.find((x) => x.key === k)!.title),
       })),
@@ -129,6 +129,7 @@ const stepUpdate = z.object({
   title: z.string().trim().min(2).max(160).optional(),
   completionCriteria: z.string().trim().max(500).optional(),
   dependsOn: z.array(z.string().max(60)).max(20).optional(),
+  requiredSkill: z.string().trim().max(40).nullable().optional(),
 });
 
 export async function updatePlanStep(ctx: AuthContext, stepId: string, raw: z.input<typeof stepUpdate>) {
@@ -173,6 +174,7 @@ export async function updatePlanStep(ctx: AuthContext, stepId: string, raw: z.in
         ...(input.title ? { title: input.title } : {}),
         ...(input.completionCriteria !== undefined ? { completionCriteria: input.completionCriteria || null } : {}),
         ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
+        ...(input.requiredSkill !== undefined ? { requiredSkill: input.requiredSkill ? input.requiredSkill.toLowerCase() : null } : {}),
       },
     });
     const done = input.status === "done" && step.status !== "done";

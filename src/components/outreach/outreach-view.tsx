@@ -388,7 +388,7 @@ function SequenceCard({
               label="Stops when they reply"
               off="Keeps sending after a reply"
               warn={sequence.stopOnReply && !provider.canReceive}
-              warnText="This provider cannot read replies, so this rule cannot be enforced automatically."
+              warnText="No mailbox is connected for reading replies, so this rule cannot be enforced automatically. Connect one in Settings → Email Accounts."
             />
             <Rule
               on={sequence.stopOnUnsubscribe}

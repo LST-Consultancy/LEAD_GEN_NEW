@@ -79,15 +79,16 @@ export function isWhatsAppConfigured(): boolean {
 }
 
 /**
- * Whether the *adapter* exists, separately from whether it is credentialled.
+ * Whether the *adapter* exists (the Cloud API, `lib/services/whatsapp.ts`), separately from
+ * whether a workspace has connected it — the connection is per workspace, not these env vars.
  *
  * These are two different gaps with two different fixes, and collapsing them
  * into one "not connected" tells an admin to go and find credentials that
  * nothing would use.
  */
-export const WHATSAPP_ADAPTER_BUILT = false;
+export const WHATSAPP_ADAPTER_BUILT = true;
 
 export const WHATSAPP_NOT_AVAILABLE =
-  "The WhatsApp adapter is not built, so nothing can be sent on this channel yet and no " +
-  "credentials are required. Consent, suppression and the message record are real — a stop " +
-  "recorded here already blocks every other channel.";
+  "WhatsApp is not connected for this workspace, so nothing can be sent on this channel. Connect " +
+  "the Cloud API in Settings → WhatsApp API. Consent, suppression and the message record are real " +
+  "— a stop recorded here already blocks every other channel.";

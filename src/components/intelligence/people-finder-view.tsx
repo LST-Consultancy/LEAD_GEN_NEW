@@ -60,6 +60,10 @@ export function PeopleFinderView({
   const [industry, setIndustry] = useState<Set<string>>(new Set());
   const [attachment, setAttachment] = useState<"any" | "is_lead" | "not_lead">("any");
   const [decisionMakersOnly, setDecisionMakersOnly] = useState(false);
+  const [origin, setOrigin] = useState<"any" | "post_author" | "enrichment" | "lookup" | "import">("any");
+  const [buyerSide, setBuyerSide] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [withinDays, setWithinDays] = useState(90);
   const [busy, setBusy] = useState(false);
 
   const run = async (over: Record<string, unknown> = {}) => {
@@ -72,6 +76,10 @@ export function PeopleFinderView({
           industry: [...industry],
           attachment,
           decisionMakersOnly,
+          origin,
+          buyerSide,
+          switching,
+          withinDays,
           ...over,
         })
       );
@@ -175,6 +183,23 @@ export function PeopleFinderView({
               Decision makers only
             </label>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-2xs text-secondary">
+            <label className="flex items-center gap-1.5">Came from
+              <select aria-label="Came from" value={origin} onChange={(e) => setOrigin(e.target.value as typeof origin)} className="rounded border border-border bg-surface px-1.5 py-0.5">
+                <option value="any">Anywhere</option>
+                <option value="post_author">Wrote an opportunity&apos;s post</option>
+                <option value="enrichment">Found by enrichment</option>
+                <option value="lookup">Lead Lens lookup</option>
+                <option value="import">Imported or added by hand</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5"><Checkbox checked={buyerSide} onCheckedChange={(v) => setBuyerSide(Boolean(v))} />Company is asking for a provider</label>
+            <label className="flex items-center gap-1.5"><Checkbox checked={switching} onCheckedChange={(v) => setSwitching(Boolean(v))} />Company is switching (migration or technology change)</label>
+            {(buyerSide || switching) && <label className="flex items-center gap-1.5">seen in the last
+              <select aria-label="Evidence window" value={withinDays} onChange={(e) => setWithinDays(Number(e.target.value))} className="rounded border border-border bg-surface px-1.5 py-0.5">{[7, 30, 90, 180, 365].map(d => <option key={d} value={d}>{d} days</option>)}</select>
+            </label>}
+          </div>
+          {(buyerSide || switching) && <p className="mt-1 text-2xs text-muted">Read from stored opportunities and signals: a request for a vendor, RFP or project counts as asking; a migration request or a recorded technology change counts as switching. Nothing is inferred beyond those records.</p>}
         </CardContent>
       </Card>
 

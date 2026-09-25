@@ -1,4 +1,5 @@
 import "server-only";
+import { readsReplies } from "./mailboxes";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
@@ -7,7 +8,6 @@ import { toPlain } from "@/lib/serialize";
 import { MutationError, loadScoped, mutate } from "@/lib/services/mutate";
 import {
   isEmailConfigured,
-  canReceiveReplies,
   activeEmailProvider,
   EMAIL_NOT_CONFIGURED,
   REPLIES_NOT_READABLE,
@@ -405,7 +405,7 @@ export async function setSequenceActive(ctx: AuthContext, id: string, isActive: 
     if (!isEmailConfigured()) {
       throw new MutationError(EMAIL_NOT_CONFIGURED, "no_provider", 422);
     }
-    if (sequence.stopOnReply && !canReceiveReplies()) {
+    if (sequence.stopOnReply && !(await readsReplies(ctx.workspaceId))) {
       throw new MutationError(REPLIES_NOT_READABLE, "cannot_read_replies", 422);
     }
   }
@@ -507,7 +507,7 @@ export async function enrollLeads(
   if (sequence.steps.length === 0) {
     throw new MutationError("This sequence has no steps to send.", "no_steps", 422);
   }
-  if (sequence.stopOnReply && !canReceiveReplies()) {
+  if (sequence.stopOnReply && !(await readsReplies(ctx.workspaceId))) {
     throw new MutationError(REPLIES_NOT_READABLE, "cannot_read_replies", 422);
   }
 

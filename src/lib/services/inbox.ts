@@ -1,8 +1,9 @@
+import { readsReplies } from "./mailboxes";
 import "server-only";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
 import { toPlain } from "@/lib/serialize";
-import { isEmailConfigured, activeEmailProvider, canReceiveReplies } from "@/lib/outreach/provider";
+import { isEmailConfigured, activeEmailProvider } from "@/lib/outreach/provider";
 
 /**
  * The Inbox is the one screen where the product's honesty problem is sharpest:
@@ -154,6 +155,7 @@ export async function getInboxCounts(ctx: AuthContext) {
 }
 
 export async function getConversation(ctx: AuthContext, id: string) {
+  const replies = await readsReplies(ctx.workspaceId);
   const conversation = await db.conversation.findFirst({
     where: { id, workspaceId: ctx.workspaceId, deletedAt: null, ...visibilityWhere(ctx) },
     include: {
@@ -255,7 +257,7 @@ export async function getConversation(ctx: AuthContext, id: string) {
     sending: {
       configured: isEmailConfigured(),
       provider,
-      canReceive: canReceiveReplies(),
+      canReceive: replies,
     },
   };
 }
@@ -265,6 +267,7 @@ export async function getConversation(ctx: AuthContext, id: string) {
  * Kept here so every surface tells the same story.
  */
 export async function getMailboxStatus(ctx: AuthContext) {
+  const replies = await readsReplies(ctx.workspaceId);
   const [pendingApproval, queued, failed, lastInbound] = await Promise.all([
     db.message.count({
       where: { workspaceId: ctx.workspaceId, state: "PENDING_APPROVAL", deletedAt: null },
@@ -283,7 +286,7 @@ export async function getMailboxStatus(ctx: AuthContext) {
   return {
     configured: isEmailConfigured(),
     provider: activeEmailProvider(),
-    canReceive: canReceiveReplies(),
+    canReceive: replies,
     pendingApproval,
     queued,
     failed,

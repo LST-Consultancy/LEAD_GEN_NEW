@@ -273,8 +273,11 @@ There is no button that silently does nothing.
   `research_company` on a data provider, `send_email` and `send_whatsapp` on a
   transport.
 - **A filter over your own data is not a prospecting tool, and says so.**
-  People Finder, Lead Lens and Radar each state that nothing is connected, so
-  a miss means "not in your data" rather than "does not exist". Every
+  People Finder and Radar search your own records, so a miss means "not in your
+  data" rather than "does not exist". Lead Lens looks there first. For a
+  LinkedIn profile, company page or domain it can then look outside, through
+  SignalHire or Apollo (profiles) or Apify (companies), only when you ask. It
+  caches the result for 30 days and holds an uncertain match for you to confirm. Every
   signal-derived screen shares one freshness notice, so four screens over the
   same data cannot imply different things about how current it is.
 - **Smart lists and static lists are counted differently, and shown apart.** A
@@ -303,8 +306,11 @@ There is no button that silently does nothing.
   only to events nothing emits is a silent misconfiguration, so an endpoint in
   that state is named on the screen. A test delivery makes a real request; a
   failure is the useful result.
-- **Bookings record, they do not schedule.** With no calendar connected,
-  nothing creates an event or sends an invite, and the screen says so. The
+- **Bookings record first, then sync.** A host who connected Google Calendar
+  gets the event created, moved and cancelled with the booking. The lead is
+  invited only when you tick it, and never at a suppressed address. With no
+  calendar connected, nothing creates an event or sends an invite, and the
+  booking says so. The
   pre-call brief needs no integration — it is assembled from score evidence,
   signals, the buying committee, open deals and earlier meeting outcomes, and
   reports how many of its seven sections actually have data so a thin brief
@@ -333,10 +339,10 @@ There is no button that silently does nothing.
 | Public proposal (`/p/…`) | What the customer sees — no login, no app chrome, the sender's name in the tab, and accept/decline that writes an audited decision |
 | Bookings | Meetings recorded against the lead, a pre-call brief assembled from real rows, and outcome capture that turns commitments into tasks |
 | Autopilot | Mode, the limits agents work inside, the policy restated in plain English, the agent-action approval queue, per-agent tool health, and a dry run that evaluates real leads against the real guardrails without writing anything |
-| Lead Lens | Paste a name, LinkedIn URL or domain and see what the workspace holds — a miss says so rather than returning an empty dossier |
-| People Finder | Search roles, seniority, industry and intent across your own data, with the scope stated |
+| Lead Lens | Paste a name, LinkedIn URL or domain and see what the workspace holds; for a profile, company page or domain, look it up outside on request, cached, with uncertain matches confirmed by you |
+| People Finder | Search roles, seniority, industry and intent across your own data, plus post authors, buyer-side and switching companies from stored evidence |
 | Live Demand | Signals grouped by what they mean, counting companies as well as signals |
-| Accounts | Company intelligence with committee health — single-threaded accounts are named, not counted |
+| Accounts | Company intelligence with an editable buying committee: suggested roles with their basis, coverage, and single-threaded accounts named |
 | Radar | What is watched, and honestly whether anything feeds it |
 | Competitors | Who gets named in your signals, plus mentions matching nobody tracked |
 | Market Intelligence | Sector and region movement, with the caveat that it describes your pipeline, not the market |
@@ -350,7 +356,7 @@ There is no button that silently does nothing.
 | Agent Activity | Every automated action, filterable by agent, risk class and outcome |
 | API Keys | Named, scoped, expirable keys with real authentication, plus the endpoint manifest |
 | Webhooks | Signed delivery with retries, a real test send, and an event catalogue that says which events actually fire |
-| MCP | The tool manifest, scope model and client config an MCP server would expose |
+| MCP | A Streamable HTTP MCP server at `/api/mcp` serving the read-only Copilot tools to an `insights.read` key |
 | CRM Integrations | What each connector would need, and what the API and webhooks already do instead |
 | Settings | Account, Team & Roles with a full permission matrix, Billing with the point ledger, Audit Log, Background Jobs |
 
@@ -415,16 +421,21 @@ twice and confirming no row changed. Mutations enqueue follow-up work: revealing
 a contact triggers a rescore (reachability is a scored dimension), and moving a
 deal triggers risk detection.
 
+The current proven status of every feature, what is tested and what still needs a live check, is in
+`docs/acceptance-matrix.md`.
+
 **Nothing is routed-but-inert any more.** All 58 navigation entries render a
 real screen reading real rows; `PlannedPage` is no longer used by any route.
 
 What remains is *capability* gaps, not screen gaps, and each is named on the
 screen that would use it:
 
-- **Email sends.** SMTP and Resend adapters are built and tested; set
-  `SMTP_URL` and `EMAIL_FROM` and sequences start delivering. **WhatsApp and
-  LinkedIn still do not send** — those need a WhatsApp Business Account and, for
-  LinkedIn, an API that does not exist. The channel screens report how many of
+- **Email sends, and replies are read.** SMTP and Resend adapters are built
+  and tested; set `SMTP_URL` and `EMAIL_FROM` and sequences start delivering.
+  Connect an IMAP mailbox in Settings → Email Accounts, and replies are read every
+  five minutes and stop stop-on-reply sequences. **WhatsApp sends through the
+  official Cloud API** once a workspace connects its Business number, to people
+  who opted in. **LinkedIn does not send**: there is no API for it. The channel screens report how many of
   your leads each one could reach, counted from contact records.
 - **LinkedIn automation is not coming.** There is no sanctioned API for
   third-party sending, so the screen states what the product will never do
@@ -548,7 +559,7 @@ address rather than about this send.
 
 - Metrics, tracing and alerting — logs are correlated, but nothing aggregates
   or watches them
-- WhatsApp and LinkedIn delivery — email sends, those two do not
+- LinkedIn delivery (no API exists); personal WhatsApp numbers (no official API)
 - Gmail, Outlook, SES and Postmark adapters; the interface and their
   requirements exist, and the screen marks each "No adapter" rather than letting
   a credential imply it works

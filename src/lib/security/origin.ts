@@ -23,7 +23,7 @@
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export type OriginVerdict =
-  | { ok: true; reason: "not_mutating" | "same_origin" | "machine_caller" }
+  | { ok: true; reason: "not_mutating" | "same_origin" | "machine_caller" | "signed_webhook" }
   | { ok: false; code: "missing_origin" | "cross_origin"; reason: string };
 
 /**
@@ -40,6 +40,12 @@ export function checkOrigin(input: {
   host: string | null;
   /** Present when the caller authenticated with an API key rather than a cookie. */
   hasApiKey: boolean;
+  /**
+   * A provider's server-to-server webhook to `/api/webhooks/inbound/*` carrying a signature header.
+   * It has no Origin by nature; the route verifies the signature and never reads a session cookie,
+   * so forgery has nothing to ride on.
+   */
+  signedWebhook?: boolean;
   allowedHosts?: string[];
 }): OriginVerdict {
   if (!MUTATING.has(input.method.toUpperCase())) {
@@ -52,6 +58,9 @@ export function checkOrigin(input: {
   // key's own lifecycle problem.
   if (input.hasApiKey) {
     return { ok: true, reason: "machine_caller" };
+  }
+  if (input.signedWebhook) {
+    return { ok: true, reason: "signed_webhook" };
   }
 
   const allowed = new Set(

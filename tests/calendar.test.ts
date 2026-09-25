@@ -1,0 +1,100 @@
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/providers/http", async (original) => ({ ...(await original<typeof import("@/lib/providers/http")>()), providerJson: vi.fn() }));
+import { providerJson } from "@/lib/providers/http";
+import { makeWorkspace, cleanup, db } from "./helpers/fixtures";
+import { eventBody } from "@/lib/calendar/google";
+import { completeGoogleConnect, readState, revokeCalendar, signState, startGoogleConnect } from "@/lib/services/calendar";
+import { cancelBooking, createBooking, rescheduleBooking } from "@/lib/services/bookings";
+
+const created = { workspaceIds: [] as string[], userIds: [] as string[], planIds: [] as string[] };
+afterAll(async () => { await cleanup(created); await db.$disconnect(); vi.unstubAllEnvs(); });
+beforeEach(() => {
+  vi.mocked(providerJson).mockReset();
+  vi.stubEnv("PROVIDER_ENCRYPTION_KEY", "ab".repeat(32));
+  vi.stubEnv("AUTH_SECRET", "s".repeat(40));
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client-id.apps.googleusercontent.com");
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret-synthetic");
+});
+const idToken = (email: string) => `x.${Buffer.from(JSON.stringify({ email })).toString("base64url")}.y`;
+const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy openid email";
+
+describe("OAuth state and event bodies", () => {
+  it("signs state, rejects tampering and expiry", () => {
+    const s = signState({ workspaceId: "w", userId: "u", nonce: "n", exp: Date.now() + 60_000 });
+    expect(readState(s)).toMatchObject({ userId: "u", nonce: "n" });
+    expect(readState(`${s.split(".")[0]}.bad`)).toBeNull();
+    expect(readState(signState({ workspaceId: "w", userId: "u", nonce: "n", exp: Date.now() - 1 }))).toBeNull();
+  });
+  it("builds a timed event with the link in the description", () => {
+    expect(eventBody({ title: "Intro", startsAt: new Date("2026-10-01T05:30:00Z"), endsAt: new Date("2026-10-01T06:00:00Z"), timezone: "Asia/Kolkata", meetingUrl: "https://meet.example/x", attendees: ["a@b.example"] })).toMatchObject({ summary: "Intro", start: { timeZone: "Asia/Kolkata" }, attendees: [{ email: "a@b.example" }], description: expect.stringContaining("https://meet.example/x") });
+  });
+});
+
+describe("Google Calendar end to end", () => {
+  it("connects only from this browser, syncs create, move and cancel, invites only on request, and revokes", async () => {
+    const w = await makeWorkspace("Calendar"); created.workspaceIds.push(w.workspace.id); created.userIds.push(w.user.id); created.planIds.push(w.plan.id);
+    const company = await db.company.create({ data: { workspaceId: w.workspace.id, name: "Buyer Synthetic", country: "India" } });
+    const person = await db.person.create({ data: { workspaceId: w.workspace.id, fullName: "Meera Synthetic", country: "India" } });
+    await db.contactMethod.create({ data: { workspaceId: w.workspace.id, personId: person.id, kind: "WORK_EMAIL", value: "meera@buyer-synthetic.example", maskedValue: "m***@buyer-synthetic.example", isLocked: false, status: "UNVERIFIED", source: "manual" } });
+    const lead = await db.lead.create({ data: { workspaceId: w.workspace.id, companyId: company.id, personId: person.id, ownerId: w.user.id, surfacedReason: "fixture" } });
+    const redirectUri = "http://localhost:3000/api/calendar/google/callback";
+
+    const { url, nonce } = startGoogleConnect(w.ctx, redirectUri);
+    expect(new URL(url).searchParams.get("scope")).toContain("calendar.events");
+    expect(new URL(url).searchParams.get("access_type")).toBe("offline");
+    const state = new URL(url).searchParams.get("state")!;
+    await expect(completeGoogleConnect(w.ctx, { code: "c", state, cookieNonce: "other-browser", redirectUri })).rejects.toThrow(/not started from this browser/);
+    vi.mocked(providerJson).mockResolvedValueOnce({ access_token: "at-1", expires_in: 3600, refresh_token: "rt-1", scope: SCOPES, id_token: idToken("host@contoso-synthetic.example") } as never);
+    expect(await completeGoogleConnect(w.ctx, { code: "c", state, cookieNonce: nonce, redirectUri })).toMatchObject({ email: "host@contoso-synthetic.example" });
+    expect(vi.mocked(providerJson).mock.calls[0][5]).toMatchObject({ form: true });
+
+    // Booked without an invite: an event, sendUpdates=none, no attendees.
+    vi.mocked(providerJson).mockResolvedValueOnce({ id: "evt-1", htmlLink: "https://calendar.google.com/e/1" } as never);
+    const start = new Date(Date.now() + 2 * 86400000);
+    const b = await createBooking(w.ctx, { title: "Intro call", leadId: lead.id, startsAt: start, endsAt: new Date(start.getTime() + 1800_000), timezone: "Asia/Kolkata" });
+    expect(b).toMatchObject({ calendarSynced: true, booking: { provider: "google", externalId: "evt-1" } });
+    let call = vi.mocked(providerJson).mock.calls.at(-1)!;
+    expect(String(call[2])).toContain("sendUpdates=none");
+    expect((call[4] as { attendees: unknown[] }).attendees).toEqual([]);
+
+    // With an invite: the lead's address, chosen by the recipient rules; sendUpdates=all.
+    vi.mocked(providerJson).mockResolvedValueOnce({ id: "evt-2" } as never);
+    const b2 = await createBooking(w.ctx, { title: "Demo", leadId: lead.id, startsAt: new Date(start.getTime() + 86400000), endsAt: new Date(start.getTime() + 86400000 + 1800_000), timezone: "Asia/Kolkata", invite: true });
+    call = vi.mocked(providerJson).mock.calls.at(-1)!;
+    expect(String(call[2])).toContain("sendUpdates=all");
+    expect((call[4] as { attendees: { email: string }[] }).attendees).toEqual([{ email: "meera@buyer-synthetic.example" }]);
+    expect(b2.note).toContain("was invited");
+
+    // A suppressed address is never invited.
+    await db.suppression.create({ data: { workspaceId: w.workspace.id, kind: "email", value: "meera@buyer-synthetic.example", reason: "asked", source: "manual" } });
+    vi.mocked(providerJson).mockResolvedValueOnce({ id: "evt-3" } as never);
+    const b3 = await createBooking(w.ctx, { title: "Follow-up", leadId: lead.id, startsAt: new Date(start.getTime() + 2 * 86400000), endsAt: new Date(start.getTime() + 2 * 86400000 + 1800_000), timezone: "Asia/Kolkata", invite: true });
+    expect((vi.mocked(providerJson).mock.calls.at(-1)![4] as { attendees: unknown[] }).attendees).toEqual([]);
+    expect(b3.note).toContain("cannot be invited");
+
+    vi.mocked(providerJson).mockResolvedValueOnce({ id: "evt-1" } as never);
+    const moved = await rescheduleBooking(w.ctx, (b.booking as { id: string }).id, { startsAt: new Date(start.getTime() + 3600_000), endsAt: new Date(start.getTime() + 5400_000) });
+    expect(moved.note).toContain("calendar event was updated");
+    expect(vi.mocked(providerJson).mock.calls.at(-1)![5]).toMatchObject({ method: "PATCH" });
+
+    vi.mocked(providerJson).mockResolvedValueOnce({} as never);
+    const cancelled = await cancelBooking(w.ctx, (b.booking as { id: string }).id, "They asked to postpone");
+    expect(cancelled.note).toContain("event was removed");
+    expect(vi.mocked(providerJson).mock.calls.at(-1)![5]).toMatchObject({ method: "DELETE" });
+
+    // An expired token is refreshed before use, and the new one saved.
+    const row = await db.calendarConnection.findFirstOrThrow({ where: { workspaceId: w.workspace.id } });
+    const { encryptCredential } = await import("@/lib/providers/credentials");
+    await db.calendarConnection.update({ where: { id: row.id }, data: { encryptedTokens: encryptCredential(JSON.stringify({ accessToken: "old", refreshToken: "rt-1", expiresAt: Date.now() - 1000, email: null }), w.workspace.id, "calendar") } });
+    vi.mocked(providerJson).mockResolvedValueOnce({ access_token: "at-2", expires_in: 3600 } as never).mockResolvedValueOnce({ id: "evt-4" } as never);
+    await createBooking(w.ctx, { title: "Check-in", startsAt: new Date(start.getTime() + 5 * 86400000), endsAt: new Date(start.getTime() + 5 * 86400000 + 1800_000), timezone: "Asia/Kolkata" });
+    expect(vi.mocked(providerJson).mock.calls.at(-1)![3]).toMatchObject({ Authorization: "Bearer at-2" });
+
+    vi.mocked(providerJson).mockResolvedValueOnce({} as never);
+    expect((await revokeCalendar(w.ctx)).note).toContain("revoke access");
+    expect(await db.calendarConnection.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ encryptedTokens: null, status: "REVOKED" });
+    const after = await createBooking(w.ctx, { title: "Offline", startsAt: new Date(start.getTime() + 6 * 86400000), endsAt: new Date(start.getTime() + 6 * 86400000 + 1800_000), timezone: "Asia/Kolkata" });
+    expect(after).toMatchObject({ calendarSynced: false, note: expect.stringContaining("no calendar connected") });
+  });
+});

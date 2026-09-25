@@ -4,6 +4,7 @@ import type { AuthContext } from "@/lib/auth/context";
 import type { NotificationKind } from "@/generated/prisma/client";
 import { MutationError } from "./mutate";
 import { recordAudit } from "./audit";
+import { canActuallySend } from "@/lib/outreach/provider";
 
 /**
  * §85 — notifications.
@@ -91,6 +92,8 @@ export type NotificationKindStat = {
   lastAt: string | null;
   /** Muted in-app for you in this workspace. */
   muted: boolean;
+  /** Also emailed to you. */
+  email: boolean;
 };
 
 const WINDOW_DAYS = 30;
@@ -100,6 +103,8 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
   windowDays: number;
   totalReceived: number;
   totalUnread: number;
+  emailAvailable: boolean;
+  emailAddress: string;
 }> {
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000);
   const where = { workspaceId: ctx.workspaceId, userId: ctx.userId, createdAt: { gte: since } };
@@ -112,7 +117,7 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
       _count: { _all: true },
     }),
     db.notification.groupBy({ by: ["kind"], where, _max: { createdAt: true } }),
-    db.notificationPreference.findMany({ where: { workspaceId: ctx.workspaceId, userId: ctx.userId, inApp: false }, select: { kind: true } }),
+    db.notificationPreference.findMany({ where: { workspaceId: ctx.workspaceId, userId: ctx.userId }, select: { kind: true, inApp: true, email: true } }),
   ]);
 
   const kinds = Object.keys(NOTIFICATION_KIND)
@@ -127,7 +132,8 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
         received,
         unread: unreadGrouped.find((g) => g.kind === kind)?._count._all ?? 0,
         lastAt: latest.find((g) => g.kind === kind)?._max.createdAt?.toISOString() ?? null,
-        muted: prefs.some((p) => p.kind === kind),
+        muted: prefs.some((p) => p.kind === kind && !p.inApp),
+        email: prefs.some((p) => p.kind === kind && p.email),
       };
     })
     // Noisiest first: the whole point is to find what you would want to mute.
@@ -138,6 +144,8 @@ export async function getNotificationSettings(ctx: AuthContext): Promise<{
     windowDays: WINDOW_DAYS,
     totalReceived: kinds.reduce((n, k) => n + k.received, 0),
     totalUnread: kinds.reduce((n, k) => n + k.unread, 0),
+    emailAvailable: canActuallySend() && (process.env.EMAIL_FROM ?? "").includes("@"),
+    emailAddress: ctx.user.email,
   };
 }
 
@@ -152,4 +160,17 @@ export async function setNotificationMuted(ctx: AuthContext, kind: string, muted
   });
   await recordAudit(ctx, { action: muted ? "notifications.muted" : "notifications.unmuted", objectType: "NotificationPreference", after: { kind } });
   return { kind, muted };
+}
+
+/** Turns email delivery of one kind on or off for the caller. In-app is unchanged. */
+export async function setNotificationEmail(ctx: AuthContext, kind: string, email: boolean) {
+  if (!(kind in NOTIFICATION_KIND)) throw new MutationError("That isn't a notification kind.", "unknown_kind", 422);
+  const k = kind as NotificationKind;
+  await db.notificationPreference.upsert({
+    where: { workspaceId_userId_kind: { workspaceId: ctx.workspaceId, userId: ctx.userId, kind: k } },
+    create: { workspaceId: ctx.workspaceId, userId: ctx.userId, kind: k, email },
+    update: { email },
+  });
+  await recordAudit(ctx, { action: email ? "notifications.email_on" : "notifications.email_off", objectType: "NotificationPreference", after: { kind } });
+  return { kind, email };
 }

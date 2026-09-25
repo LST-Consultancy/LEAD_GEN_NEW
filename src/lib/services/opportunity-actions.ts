@@ -83,13 +83,13 @@ const crmSchema = z.object({ personId: z.string().uuid({ message: "Choose who th
 function signalTypeFor(kind: string, types: string[]): "RFP" | "HIRING" | "SOCIAL_POST" | "NEWS" | "ANNOUNCEMENT" {
   if (types.includes("RFP")) return "RFP";
   if (kind === "JOB_BOARD") return "HIRING";
-  if (kind === "LINKEDIN_PUBLIC_POST") return "SOCIAL_POST";
+  if (kind === "LINKEDIN_PUBLIC_POST" || kind === "COMMUNITY_POST") return "SOCIAL_POST";
   if (kind === "NEWS") return "NEWS";
   return "ANNOUNCEMENT";
 }
 function sourceKindFor(kind: string): "JOB_BOARD" | "SOCIAL_PUBLIC" | "NEWS" | "TENDER_PORTAL" | "PUBLIC_WEB" {
   if (kind === "JOB_BOARD") return "JOB_BOARD";
-  if (kind === "LINKEDIN_PUBLIC_POST") return "SOCIAL_PUBLIC";
+  if (kind === "LINKEDIN_PUBLIC_POST" || kind === "COMMUNITY_POST") return "SOCIAL_PUBLIC";
   if (kind === "NEWS") return "NEWS";
   if (kind === "RFP") return "TENDER_PORTAL";
   return "PUBLIC_WEB";
@@ -112,7 +112,10 @@ export async function opportunityToCrm(ctx: AuthContext, id: string, raw: unknow
     const { lead, created, signals } = await db.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "Workspace" WHERE id = ${ctx.workspaceId}::uuid FOR UPDATE`;
       const existing = await tx.lead.findFirst({ where: { workspaceId: ctx.workspaceId, companyId: opportunity.companyId, personId, deletedAt: null } });
-      const lead = existing ?? await tx.lead.create({ data: { workspaceId: ctx.workspaceId, companyId: opportunity.companyId, personId, ownerId: ctx.userId, icpProfileId: icp?.id ?? null, surfacedReason: `Opportunity: ${opportunity.title}`.slice(0, 500) } });
+      // A watched phrase that found this opportunity gets the lead, so its revenue is attributed to it.
+      const viaPhrase = existing ? null : await tx.opportunitySearchResult.findFirst({ where: { workspaceId: ctx.workspaceId, opportunityId: id, search: { workspaceId: ctx.workspaceId, searchPhraseId: { not: null } } }, orderBy: { search: { createdAt: "asc" } }, select: { search: { select: { searchPhraseId: true } } } });
+      const phraseId = viaPhrase?.search.searchPhraseId ? (await tx.searchPhrase.findFirst({ where: { id: viaPhrase.search.searchPhraseId, workspaceId: ctx.workspaceId }, select: { id: true } }))?.id ?? null : null;
+      const lead = existing ?? await tx.lead.create({ data: { workspaceId: ctx.workspaceId, companyId: opportunity.companyId, personId, ownerId: ctx.userId, icpProfileId: icp?.id ?? null, sourcePhraseId: phraseId, surfacedReason: `Opportunity: ${opportunity.title}`.slice(0, 500) } });
       if (existing && !existing.icpProfileId && icp) await tx.lead.update({ where: { id: existing.id }, data: { icpProfileId: icp.id } });
       const confidence = Math.max(30, ...opportunity.evidence.map(e => e.confidence));
       let signals = 0;

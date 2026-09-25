@@ -16,7 +16,7 @@ import { formatDate, formatInr, formatInrCompact } from "@/lib/format";
 
 type Step = {
   id: string; key: string; order: number; phase: string; title: string; completionCriteria: string | null; dependsOn: string[];
-  isClientGate: boolean; status: string; owner: { id: string; name: string } | null; artifact: string | null; note: string | null;
+  isClientGate: boolean; status: string; requiredSkill?: string | null; owner: { id: string; name: string } | null; artifact: string | null; note: string | null;
   clientApprovedBy: string | null; clientApprovedAt: string | null; completedAt: string | null; waitingOn: string[];
 };
 type Money = { invoicedInr: number; paidInr: number; entries: number };
@@ -52,6 +52,7 @@ export function PlanView({ data, canEdit, canConfigure = false, templates = [] }
           <h1 className="truncate text-lg font-semibold text-primary">{data.deal.title}</h1>
           <p className="text-2xs text-muted"><Link href={`/accounts/${data.deal.company.id}`} className="hover:underline">{data.deal.company.name}</Link> · {formatInrCompact(data.deal.valueInr)} · {data.deal.status.toLowerCase()}{data.plan ? ` · ${done} of ${steps.length} done · ${data.plan.template}` : ""}</p>
         </div>
+        {data.plan && canEdit && steps.some((x) => !x.owner && x.status !== "done" && x.status !== "skipped") ? <AssignButton dealId={data.deal.id} /> : null}
         {data.plan && canConfigure ? <SaveTemplateButton dealId={data.deal.id} /> : null}
       </div>
 
@@ -124,6 +125,7 @@ function StepCard({ step, members, canEdit, steps, money, first, last }: { step:
         <p className="text-2xs text-secondary">On the deal: {step.key === "invoice" ? `${formatInr(money.invoicedInr, { paise: true })} invoiced` : `${formatInr(money.paidInr, { paise: true })} received`}{money.entries === 0 ? " — nothing recorded yet (record it on the lead's deal)" : ""}. Mark the step done yourself when it is.</p>
       ) : null}
       {step.completionCriteria ? <p className="text-2xs text-muted">Done when: {step.completionCriteria}</p> : null}
+      {canEdit ? <SkillField step={step} disabled={pending} onSave={(v) => void patch({ requiredSkill: v || null }, v ? `Needs “${v}”` : "Skill requirement removed")} /> : step.requiredSkill ? <p className="text-2xs text-muted">Needs: {step.requiredSkill}</p> : null}
       {locked && step.status !== "done" ? <p className="flex items-center gap-1 text-2xs text-secondary"><Lock className="size-2.5" />Waiting on {step.waitingOn.join(", ")}</p> : null}
       {step.clientApprovedBy ? <p className="text-2xs text-success-text">Client approval recorded: {step.clientApprovedBy}{step.clientApprovedAt ? `, ${formatDate(step.clientApprovedAt)}` : ""} — as recorded by the team, not verified.</p> : null}
       {canEdit ? (
@@ -250,4 +252,33 @@ function SaveTemplateButton({ dealId }: { dealId: string }) {
       </Dialog>
     </>
   );
+}
+
+function SkillField({ step, disabled, onSave }: { step: Step; disabled: boolean; onSave: (v: string) => void }) {
+  const [v, setV] = React.useState(step.requiredSkill ?? "");
+  return <label className="flex items-center gap-1 text-2xs text-muted">Needs skill
+    <input aria-label={`Skill needed for ${step.title}`} value={v} maxLength={40} disabled={disabled} onChange={(e) => setV(e.target.value)} onBlur={() => { if ((step.requiredSkill ?? "") !== v.trim().toLowerCase()) onSave(v.trim()); }} placeholder="any" className="h-6 w-24 rounded border border-border bg-surface px-1" />
+  </label>;
+}
+
+/** Previews, then applies, skill-and-capacity assignment of this plan's unowned steps. */
+function AssignButton({ dealId }: { dealId: string }) {
+  const router = useRouter();
+  const [preview, setPreview] = React.useState<{ stepId: string; title: string; ownerId: string | null; reason: string }[] | null>(null);
+  const [pending, setPending] = React.useState(false);
+  async function run(dryRun: boolean) {
+    setPending(true);
+    try {
+      const r = await api.post<{ assignments: { stepId: string; title: string; ownerId: string | null; reason: string }[] }>(`/api/deals/${dealId}/plan/assign`, { dryRun });
+      if (dryRun) setPreview(r.assignments); else { setPreview(null); toast.success("Steps assigned", { description: `${r.assignments.filter((a) => a.ownerId).length} assigned; the rest say why not.` }); router.refresh(); }
+    } catch (err) { toast.error("Couldn't assign", { description: errorText(err) }); } finally { setPending(false); }
+  }
+  return <div className="relative">
+    <Button variant="secondary" size="sm" loading={pending} onClick={() => void run(true)}>Assign unowned steps</Button>
+    {preview ? <div className="absolute right-0 z-10 mt-1 w-80 space-y-1.5 rounded-md border border-border bg-surface p-2 text-2xs shadow-lg">
+      <p className="font-medium text-primary">By skill and capacity</p>
+      <ul className="space-y-1">{preview.map((a) => <li key={a.stepId}><span className="font-medium">{a.title}</span>: {a.reason}</li>)}</ul>
+      <div className="flex gap-1.5"><Button size="xs" variant="primary" disabled={pending || !preview.some((a) => a.ownerId)} onClick={() => void run(false)}>Apply</Button><Button size="xs" variant="ghost" onClick={() => setPreview(null)}>Cancel</Button></div>
+    </div> : null}
+  </div>;
 }

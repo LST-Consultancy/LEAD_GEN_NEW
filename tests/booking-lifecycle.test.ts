@@ -20,10 +20,12 @@ const at = (h: number) => new Date(Date.now() + h * HOUR);
 describe("honest calendar notes", () => {
   it("a Gmail/Google credential does not make a booking claim calendar sync", async () => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "gmail-sending-client");
-    expect(canSyncCalendar()).toBe(false);
+    // The server can now connect calendars, but only a host who connected theirs gets events.
+    expect(canSyncCalendar()).toBe(true);
     const w = await workspace();
     const r = await createBooking(w.ctx, { title: "Discovery", startsAt: at(24), endsAt: at(25) });
-    expect(r.note).toMatch(/No invite was sent/);
+    expect(r.calendarSynced).toBe(false);
+    expect(r.note).toMatch(/no event was created and no invite was sent/);
     const c = await cancelBooking(w.ctx, r.booking.id, "They asked to postpone");
     expect(c.note).toMatch(/nobody was notified/);
   });

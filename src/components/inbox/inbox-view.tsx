@@ -358,7 +358,7 @@ function MailboxBanner({ mailbox }: { mailbox: Mailbox }) {
         Connected to <strong className="text-primary">{mailbox.provider}</strong>.
         {mailbox.canReceive
           ? " Replies are read back, so sequences stop automatically when someone answers."
-          : " This provider cannot read replies, so stop-on-reply has to be manual."}
+          : " No mailbox is connected for reading replies (Settings → Email Accounts), so stop-on-reply has to be logged by hand."}
         {mailbox.failed > 0 ? ` ${mailbox.failed} message(s) failed to send.` : null}
       </div>
     );

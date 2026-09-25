@@ -1,5 +1,7 @@
 # Audit implementation tracker
 
+> **Superseded as the statement of what is proven by `docs/acceptance-matrix.md` (2026-09-25).** Rows below record what each task changed; the matrix records what is tested, what is live-verified and what is blocked.
+
 Source: ProspecX → Signalroom functional audit, 24 Sep 2026
 (`/Users/lstuser/Documents/Codex/2026-09-24/files-mentioned-by-the-user-lead/outputs/`).
 Each finding is re-verified against current code before it is changed.
@@ -138,3 +140,52 @@ month at most; company size, industry and country are almost never in a post, so
 filtered LinkedIn searches mostly land in review; Brave and job-board discovery
 still use the older single-pass flow and still drop web results whose buyer the
 AI could not name.
+
+
+## Rollout — 2026-09-25
+
+**Not applied to the working database or the running app.** The working database is at
+`20260924170000_apify_enrichment`. The nine migrations below are pending. Every one is additive —
+new tables, new nullable or defaulted columns, and one default changed from "India" to "Unknown" —
+and none drops, rewrites or deletes data.
+
+| Migration | Adds |
+|---|---|
+| `20260924172406_contact_domain_status` | `CompanyContactPoint.domainStatus` and `possiblePersonId`. Changes the country default to "Unknown" for new rows only. |
+| `20260925045905_offering_profiles` | `OfferingProfile` |
+| `20260925050508_phrase_watch_links` | `OpportunitySearch.searchPhraseId` and `SearchPhrase.createdById` |
+| `20260925050928_external_lookups` | `ExternalLookup` (the Lead Lens cache and history) |
+| `20260925051757_committee_removed_at` | `CommitteeMember.removedAt` |
+| `20260925052203_mailboxes` | `Mailbox` (IMAP reply reading) |
+| `20260925053552_calendar_connections` | `CalendarConnection` |
+| `20260925054119_email_delivery` | Notification email columns, `NotificationPreference.email` and invitation email columns |
+| `20260925054747_teamcollab_routing` | Member skills, capacity and away flag; `DealPlanStep.requiredSkill` |
+
+To roll out, in your own terminal:
+
+1. Back up the database (`pg_dump`).
+2. Stop the app and the worker.
+3. Run `npx prisma migrate deploy`, then `npx prisma generate`.
+4. Run `npm run build`.
+5. Start the app and `npm run worker` again. The worker registers two new five-minute jobs: reading mailboxes and emailing notifications.
+6. Optional environment variables, for the features that need them:
+   - `APP_URL`: links in emails, and the calendar callback.
+   - `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`: calendar. Register the callback `<APP_URL>/api/calendar/google/callback`.
+   - `OPENAI_API_KEY`: MP3 download of briefings.
+   - `SMTP_URL` and `EMAIL_FROM`: notification and invitation email. The same values already used for sending.
+
+Nothing new runs until you configure it:
+
+- Contact-provider fallback: off by default.
+- Apify discovery platforms: each is its own connection.
+- Offerings: none exist yet.
+- Mailboxes, WhatsApp and the calendar: none connected.
+- Email per notification kind: off.
+- MCP: needs an API key issued with `insights.read`.
+
+Two data notes:
+
+- Existing contact points get `domainStatus = "matched"`. That is correct, because earlier code
+  saved only same-domain addresses.
+- Companies and people imported earlier as "India" keep that value. The right country can't be
+  inferred, so review them by hand if it matters.

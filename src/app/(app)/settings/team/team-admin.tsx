@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/format";
 
 type Role = { id: string; name: string };
 type Invitation = { id: string; email: string; role: Role; createdAt: string; expiresAt: string; state: "pending" | "expired" };
-type Issued = { email: string; role: string; expiresAt: string; link: string };
+type Issued = { email: string; role: string; expiresAt: string; link: string; emailed?: boolean; note?: string | null };
 
 const errorText = (err: unknown) => (err instanceof ApiError ? err.message : "Something went wrong. Nothing was changed.");
 
@@ -78,7 +78,7 @@ function IssuedLink({ issued }: { issued: Issued }) {
       </div>
       <p className="text-2xs text-secondary">
         <Mail className="mr-0.5 inline size-3" />
-        No email was sent. Send this link to them yourself — it is shown only now, and it is the only thing needed to join.
+        {issued.emailed ? issued.note : `${issued.note ? `${issued.note} ` : "No email was sent. "}Send this link to them yourself — it is shown only now, and it is the only thing needed to join.`}
       </p>
     </div>
   );
@@ -92,11 +92,12 @@ export function InvitationsCard({ initial, roles }: { initial: Invitation[]; rol
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState("");
   const [issued, setIssued] = React.useState<Issued | null>(null);
+  const [sendEmail, setSendEmail] = React.useState(false);
 
   async function invite() {
     setPending("new"); setError("");
     try {
-      const r = await api.post<Issued>("/api/team/invitations", { email, roleId });
+      const r = await api.post<Issued>("/api/team/invitations", { email, roleId, sendEmail });
       setIssued(r); setEmail(""); router.refresh();
     } catch (err) { setError(errorText(err)); } finally { setPending(null); }
   }
@@ -153,6 +154,7 @@ export function InvitationsCard({ initial, roles }: { initial: Invitation[]; rol
                 <select aria-label="Role" value={roleId} onChange={(e) => setRoleId(e.target.value)} className="h-8 w-full rounded-md border border-border bg-surface px-2 text-xs">
                   {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
+                <label className="flex items-center gap-2 text-xs text-secondary"><input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} />Also send them the link by mail (needs a mail provider on the server)</label>
                 {error ? <p className="text-xs text-danger-text">{error}</p> : null}
               </>
             )}
@@ -169,4 +171,32 @@ export function InvitationsCard({ initial, roles }: { initial: Invitation[]; rol
       </Dialog>
     </Card>
   );
+}
+
+/** Skills, step capacity and away, which plan routing reads. Shown to everyone; edited by user managers. */
+export function MemberRouting({ member, openSteps, canEdit }: { member: { id: string; name: string; skills: string[]; stepCapacity: number | null; isAway: boolean }; openSteps: number; canEdit: boolean }) {
+  const router = useRouter();
+  const [editing, setEditing] = React.useState(false);
+  const [skills, setSkills] = React.useState(member.skills.join(", "));
+  const [capacity, setCapacity] = React.useState(member.stepCapacity?.toString() ?? "");
+  const [away, setAway] = React.useState(member.isAway);
+  const [pending, setPending] = React.useState(false);
+  const summary = `${member.skills.length ? member.skills.join(", ") : "no skills set"} · ${openSteps}${member.stepCapacity ? `/${member.stepCapacity}` : ""} open steps${member.isAway ? " · away" : ""}`;
+  async function save() {
+    setPending(true);
+    try {
+      await api.put(`/api/team/members/${member.id}/routing`, { skills: skills.split(",").map((s) => s.trim()).filter(Boolean), stepCapacity: capacity ? Number(capacity) : null, isAway: away });
+      toast.success(`${member.name} updated`); setEditing(false); router.refresh();
+    } catch (err) { toast.error("Not saved", { description: err instanceof ApiError ? err.message : "Nothing was changed." }); } finally { setPending(false); }
+  }
+  if (!editing) return <span className="text-secondary">{summary}{canEdit ? <button type="button" className="ml-1 underline" onClick={() => setEditing(true)}>edit</button> : null}</span>;
+  return <span className="flex flex-col gap-1">
+    <Input aria-label={`Skills for ${member.name}`} value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="netsuite, integration" className="h-7 text-2xs" />
+    <span className="flex items-center gap-1">
+      <Input aria-label={`Step capacity for ${member.name}`} type="number" min={1} max={200} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="no limit" className="h-7 w-20 text-2xs" />
+      <label className="flex items-center gap-1"><input type="checkbox" checked={away} onChange={(e) => setAway(e.target.checked)} />away</label>
+      <Button size="xs" variant="primary" loading={pending} onClick={() => void save()}>Save</Button>
+      <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+    </span>
+  </span>;
 }

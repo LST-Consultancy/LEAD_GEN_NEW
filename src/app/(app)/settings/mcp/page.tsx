@@ -28,8 +28,8 @@ export default async function McpPage() {
         risk: s.risk,
         describes: s.describes,
       }))}
-      // There is no MCP transport yet. Stated rather than implied.
-      serverRunning={false}
+      // The Streamable HTTP endpoint is /api/mcp; it serves READ tools only.
+      serverRunning={true}
       baseUrl={`${proto}://${host}`}
     />
   );

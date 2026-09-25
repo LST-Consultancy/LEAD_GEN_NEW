@@ -14,7 +14,7 @@ import { judgeSearchJob } from "@/lib/opportunities/search-status";
 import { estimate, parseEnrichmentConfig, PRICE_NOTE, type EnrichmentConfig } from "@/lib/enrichment/config";
 import { freshStages, PLAN, RUN_KINDS, TERMINAL, type RunKind, type Stage } from "@/lib/enrichment/stages";
 import type { CompanyProfile } from "@/lib/enrichment/identity";
-import { applyCompanyFields, enrichmentConnection, ENRICHMENT_PROVIDER } from "./enrichment-runner";
+import { applyCompanyFields, enrichmentConnection, ENRICHMENT_PROVIDER, type EmailDomain } from "./enrichment-runner";
 
 const ACTIVE = ["QUEUED", "RUNNING"];
 const permissionFor = (kind: RunKind) => (kind === "research" ? PERMISSIONS.LEADS_EDIT : PERMISSIONS.LEADS_REVEAL);
@@ -101,7 +101,7 @@ export async function getOpportunityEnrichment(ctx: AuthContext, opportunityId: 
   return toPlain({
     company: { id: company.id, name: company.name, domain: company.domain, website: company.website, linkedinUrl: company.linkedinUrl, description: company.description, industry: company.industry, city: company.city, state: company.state, country: company.country, employeeCount: company.employeeCount, employeeBand: company.employeeBand, enrichment: company.enrichment },
     people: people.map(e => ({ employmentId: e.id, personId: e.personId, name: e.person.fullName, title: e.title, linkedinUrl: e.person.linkedinUrl, city: e.person.city, country: e.person.country, association: e.association, isDecisionMaker: e.isDecisionMaker, evidence: e.evidence, source: e.source, contacts: e.person.contactMethods.map(m => ({ id: m.id, kind: m.kind, value: m.value, verificationResult: m.verificationResult, verifiedAt: m.verifiedAt, source: m.source, provenance: m.provenance })) })),
-    contactPoints: contactPoints.filter(p => !suppressed.has(p.value.toLowerCase())).map(p => ({ id: p.id, kind: p.kind, value: p.value, isGeneric: p.isGeneric, source: p.source, evidence: p.evidence, verificationResult: p.verificationResult, verifiedAt: p.verifiedAt })),
+    contactPoints: contactPoints.filter(p => !suppressed.has(p.value.toLowerCase())).map(p => ({ id: p.id, kind: p.kind, value: p.value, isGeneric: p.isGeneric, domainStatus: p.domainStatus, possiblePersonId: p.possiblePersonId, source: p.source, evidence: p.evidence, verificationResult: p.verificationResult, verifiedAt: p.verifiedAt })),
     runs,
     setup: "missing" in conn ? { ready: false, message: conn.missing } : { ready: true, message: null },
     estimates: Object.fromEntries(RUN_KINDS.map(k => [k, estimateRun(k, cfg)])),
@@ -198,4 +198,31 @@ export async function autoEnrichAfterDiscovery(workspaceId: string, searchId: st
     try { await startEnrichment(ctx, o.id, { kind: "enrich" }, { trigger: "auto" }); queued++; } catch { /* reported on the run or skipped; discovery is unaffected */ }
   }
   return { queued, reason: null };
+}
+
+const domainDecisionSchema = z.object({ domain: z.string().trim().toLowerCase().min(3).max(253).regex(/^[a-z0-9.-]+\.[a-z]{2,}$/), decision: z.enum(["accept", "reject"]) });
+/**
+ * A person decides whether a domain seen in evidence is this company's email domain. Accepting
+ * turns its addresses from "review" into the company's own (the next Find emails run may then give
+ * a named address to its person); rejecting keeps them as evidence but never checks or assigns
+ * them. Either way the decision is recorded and later runs do not re-open it.
+ */
+export async function decideEmailDomain(ctx: AuthContext, opportunityId: string, raw: unknown) {
+  const input = domainDecisionSchema.parse(raw ?? {});
+  const opportunity = await getOpportunity(ctx, opportunityId);
+  const company = await loadScoped(() => db.company.findFirst({ where: { id: opportunity.companyId, workspaceId: ctx.workspaceId } }), "That company");
+  const e = (company.enrichment ?? {}) as { emailDomains?: EmailDomain[] } & Record<string, unknown>;
+  const list = e.emailDomains ?? [];
+  const prior = list.find(d => d.domain === input.domain);
+  if (!prior) throw new MutationError("That domain has not been seen for this company, so there is nothing to decide.", "not_found", 404);
+  const status = input.decision === "accept" ? "alias" : "rejected";
+  return mutate(ctx, PERMISSIONS.LEADS_EDIT, async () => {
+    const next = list.map(d => (d.domain === input.domain ? { ...d, status, basis: input.decision === "accept" ? "Confirmed as the company's email domain by a person." : "Rejected as the company's email domain by a person.", at: new Date().toISOString(), decidedBy: ctx.userId } as EmailDomain : d));
+    await db.company.update({ where: { id: company.id }, data: { enrichment: { ...e, emailDomains: next } as Prisma.InputJsonValue } });
+    const { count } = await db.companyContactPoint.updateMany({ where: { workspaceId: ctx.workspaceId, companyId: company.id, kind: "EMAIL", value: { endsWith: `@${input.domain}`, mode: "insensitive" } }, data: { domainStatus: status } });
+    return {
+      result: { domain: input.domain, status, addresses: count },
+      log: { action: "company.email_domain_decided", objectType: "Company", objectId: company.id, before: { domain: input.domain, status: prior.status }, after: { domain: input.domain, status } },
+    };
+  });
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { syncBookingEvent } from "./calendar";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { type AuthContext, dealVisibilityFilter, leadVisibilityFilter } from "@/lib/auth/context";
@@ -58,12 +59,13 @@ export function isCalendarConfigured(): boolean {
 }
 
 /**
- * Whether a calendar adapter exists to act on that credential. None does. The
- * Google client id is also Gmail's sending credential, so connecting Gmail made
- * every booking say "synced to your calendar" and every cancellation say "the
- * calendar event was removed" while nothing touched a calendar.
+ * Whether a calendar adapter exists to act on that credential. Google does
+ * (`lib/calendar/google.ts`); it still syncs only for a host who connected
+ * their own calendar, so screens report sync per booking, never from this flag
+ * alone — the Google client id is also Gmail's credential, and treating its
+ * presence as "synced" once told users events existed that did not.
  */
-export const CALENDAR_ADAPTER_BUILT: Record<string, boolean> = { google: false, microsoft: false, caldav: false };
+export const CALENDAR_ADAPTER_BUILT: Record<string, boolean> = { google: true, microsoft: false, caldav: false };
 
 export function canSyncCalendar(): boolean {
   const active = activeCalendarProvider();
@@ -94,6 +96,8 @@ const bookingSchema = z
     location: z.string().trim().max(300).optional(),
     meetingUrl: z.string().trim().url("That does not look like a meeting link.").max(500).optional(),
     agenda: z.string().trim().max(5000).optional(),
+    /** Invite the lead through the host's calendar. Off unless a person asks: an invitation is a message. */
+    invite: z.boolean().default(false),
   })
   .refine((v) => v.endsAt > v.startsAt, {
     message: "The meeting ends before it starts.",
@@ -256,7 +260,7 @@ export async function getBookingBrief(ctx: AuthContext, id: string) {
 
   const committee = lead?.company
     ? await db.committeeMember.findMany({
-        where: { workspaceId: ctx.workspaceId, companyId: lead.company.id },
+        where: { workspaceId: ctx.workspaceId, companyId: lead.company.id, removedAt: null },
         orderBy: { influence: "desc" },
         take: 6,
         select: {
@@ -435,7 +439,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
     select: { id: true, title: true, startsAt: true },
   });
 
-  return mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
+  const result = await mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
     const booking = await db.booking.create({
       data: {
         workspaceId: ctx.workspaceId,
@@ -463,9 +467,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
         clash: clash
           ? `You already have "${clash.title}" overlapping this slot. Recorded anyway — this app does not own your calendar.`
           : null,
-        note: canSyncCalendar()
-          ? "Recorded and synced to your calendar."
-          : "Recorded against the lead. No invite was sent and no calendar event was created — arrange the meeting itself in your own calendar.",
+        note: "",
       },
       log: {
         action: "booking.created",
@@ -474,7 +476,7 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
         after: {
           title: input.title,
           startsAt: input.startsAt.toISOString(),
-          calendarSynced: canSyncCalendar(),
+          inviteRequested: input.invite,
         },
         activity: {
           kind: "booking.created",
@@ -484,6 +486,10 @@ export async function createBooking(ctx: AuthContext, raw: BookingInput) {
       },
     };
   });
+  // After the record exists: the calendar is a side effect, and its failure is reported, not fatal.
+  const stored = await db.booking.findUniqueOrThrow({ where: { id: (result.booking as { id: string }).id } });
+  const sync = await syncBookingEvent(ctx.workspaceId, stored, "create", { invite: input.invite });
+  return { ...result, booking: { ...result.booking, ...(sync.externalId ? { provider: "google", externalId: sync.externalId } : {}) }, note: sync.note, calendarSynced: sync.synced };
 }
 
 const outcomeSchema = z.object({
@@ -628,12 +634,12 @@ export async function rescheduleBooking(ctx: AuthContext, id: string, raw: z.inp
   if (booking.state !== "scheduled") {
     throw new MutationError(`This meeting is ${booking.state}, so there is nothing to move. Book a new one instead.`, "not_scheduled", 409);
   }
-  return mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
+  const moved = await mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
     const updated = await db.booking.update({ where: { id }, data: { startsAt: input.startsAt, endsAt: input.endsAt, ...(input.timezone ? { timezone: input.timezone } : {}) } });
     return {
       result: {
         booking: toPlain(updated),
-        note: canSyncCalendar() ? "Moved, and the calendar event was updated." : "Moved here. No calendar is connected, so nobody was told — let them know yourself.",
+        note: "",
       },
       log: {
         action: "booking.rescheduled", objectType: "Booking", objectId: id,
@@ -643,6 +649,8 @@ export async function rescheduleBooking(ctx: AuthContext, id: string, raw: z.inp
       },
     };
   });
+  const sync = await syncBookingEvent(ctx.workspaceId, { ...booking, startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone ?? booking.timezone }, "move");
+  return { ...moved, note: sync.note, calendarSynced: sync.synced };
 }
 
 export async function cancelBooking(ctx: AuthContext, id: string, reason: string) {
@@ -667,7 +675,7 @@ export async function cancelBooking(ctx: AuthContext, id: string, reason: string
     );
   }
 
-  return mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
+  const cancelled = await mutate(ctx, PERMISSIONS.PIPELINE_EDIT, async () => {
     const updated = await db.booking.update({
       where: { id },
       data: {
@@ -679,9 +687,7 @@ export async function cancelBooking(ctx: AuthContext, id: string, reason: string
     return {
       result: {
         booking: toPlain(updated),
-        note: canSyncCalendar()
-          ? "Cancelled, and the calendar event was removed."
-          : "Cancelled here. No calendar is connected, so nobody was notified — tell them yourself.",
+        note: "",
       },
       log: {
         action: "booking.cancelled",
@@ -697,4 +703,6 @@ export async function cancelBooking(ctx: AuthContext, id: string, reason: string
       },
     };
   });
+  const sync = await syncBookingEvent(ctx.workspaceId, booking, "cancel");
+  return { ...cancelled, note: sync.note, calendarSynced: sync.synced };
 }

@@ -58,7 +58,7 @@ export async function logTouch(ctx: AuthContext, leadId: string, raw: z.input<ty
       });
       return count;
     });
-    // Logged by hand until a reply reader exists; the payload says so.
+    // Logged by hand; a connected mailbox records replies itself with loggedByHand: false.
     if (replied) await emitWebhookEvent(ctx.workspaceId, "message.replied", { leadId: lead.id, channel: input.channel, occurredAt: at.toISOString(), loggedByHand: true, sequencesStopped: stopped });
     const verb = input.direction === "INBOUND" ? `${CHANNEL_WORD[input.channel]} reply from` : `${CHANNEL_WORD[input.channel]} to`;
     const summary = `${verb} ${lead.person.fullName}${input.outcome ? ` — ${OUTCOME_LABEL[input.outcome]}` : ""}`;

@@ -5,7 +5,8 @@ import { extractOpportunity, type SourceDocument } from "@/lib/opportunities/ext
 import { hash, normalizedCompany, normalizedDomain, opportunityKey, canonicalUrl } from "@/lib/opportunities/identity";
 import { criteriaSchema, type SearchCriteria } from "@/lib/opportunities/query-parser";
 import { scoreOpportunity } from "@/lib/opportunities/scoring";
-import { DEFAULT_WEIGHTS, scoreLead, type ScoringWeights } from "@/lib/scoring";
+import { DEFAULT_WEIGHTS, type ScoringWeights } from "@/lib/scoring";
+import { fitEvidenceFor } from "@/lib/opportunities/fit";
 import { discoveryProvider, providerConfigSchema } from "@/lib/providers/discovery";
 import { decryptCredential } from "@/lib/providers/credentials";
 import { z } from "zod";
@@ -15,6 +16,11 @@ import { complete } from "@/lib/ai/complete";
 import { BUYER_SYSTEM_PROMPT, buyerPrompt, parseBuyerReply, screenUnattributed, verifyBuyer, type BuyerAttribution, type ScreenReason } from "@/lib/opportunities/buyer";
 import { raiseNotification } from "@/lib/services/notify";
 import { LINKEDIN_POSTS_PROVIDER } from "@/lib/providers/linkedin-posts";
+import { isApifyPlatform, PLATFORMS } from "@/lib/opportunities/apify-platforms";
+import { parseDiscoveryOptions } from "@/lib/opportunities/linkedin-plan";
+import { apifyTokenFor, searchApifyPlatform, type PlatformOutcome } from "@/lib/providers/apify-discovery";
+import { saveBusinessProspects } from "./business-prospects";
+import { finishPhraseRun } from "./phrase-watches";
 import { readCheckpoint, runLinkedInDiscovery, saveProviderCheckpoint } from "./linkedin-discovery";
 
 /**
@@ -69,7 +75,7 @@ export async function ingestOpportunity(workspaceId: string, searchId: string, d
     const config = await tx.scoringConfig.findUnique({ where: { workspaceId } });
     const weights: ScoringWeights = config ? { fit: config.fitWeight, intent: config.intentWeight, urgency: config.urgencyWeight, authority: config.authorityWeight, budget: config.budgetWeight, reachability: config.reachabilityWeight, engagement: config.engagementWeight, recency: config.recencyWeight } : DEFAULT_WEIGHTS;
     const icp = await tx.icpProfile.findFirst({ where: { workspaceId, deletedAt: null, isPrimary: true } });
-    const fit = icp ? scoreLead({ icp, company, role: { title: "", seniority: null, department: null, isDecisionMaker: false }, signals: [], contacts: [], engagement: { outboundCount: 0, inboundCount: 0, repliedAt: null, meetingsHeld: 0, proposalViews: 0 }, budget: { estimatedInr: null }, now }, weights).evidence.filter(e => e.dimension === "fit") : [];
+    const fit = fitEvidenceFor(icp, company, weights, now);
     const rules = z.record(z.string(),z.number().min(0).max(100)).safeParse(config?.opportunityRules ?? {});
     const overrides = rules.success ? Object.fromEntries(Object.entries(rules.data).filter(([key])=>key in DEFAULT_RULES)) : {};
     const score = scoreOpportunity(extracted, doc, now, weights, overrides, fit);
@@ -175,6 +181,37 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
       if (cancelled) break;
       continue;
     }
+    if (isApifyPlatform(provider)) {
+      try {
+        const key = await apifyTokenFor(workspaceId, provider);
+        if (!key) throw new PartialDiscoveryError("No Apify token is saved. Add one on this connection or on LinkedIn posts. Nothing was run or charged.", []);
+        let result: PlatformOutcome; let partialMessage: string | null = null;
+        try { result = await searchApifyPlatform({ workspaceId, searchId, provider, rawConfig: connection.config, criteria, key, routing: parseDiscoveryOptions(search.options).routing, shouldCancel: async () => Boolean((await db.opportunitySearch.findFirst({ where: { id: searchId, workspaceId }, select: { cancelRequestedAt: true } }))?.cancelRequestedAt) }); }
+        catch (error) { const o = (error as { outcome?: PlatformOutcome }).outcome; if (!o) throw error; result = o; partialMessage = error instanceof Error ? error.message : "Part of this platform's search failed."; }
+        let created = 0; let duplicates = 0; let updated = 0;
+        const { kept, screened } = await resolveBuyers(workspaceId, result.documents, criteria);
+        for (const document of kept) {
+          const r = await ingestOpportunity(workspaceId, searchId, document, criteria, connection);
+          if (r?.changed) updated++; else if (r?.duplicate) duplicates++; else if (r) created++;
+        }
+        const prospects = result.places.length ? await saveBusinessProspects(workspaceId, searchId, provider, result.places) : null;
+        const partial = Boolean(partialMessage);
+        const nothingRan = !result.runs && !partial;
+        found += result.documents.length + result.places.length; if (!partial && !nothingRan) success++;
+        outcomes[provider] = { status: partial ? "PARTIAL" : nothingRan ? "SKIPPED" : "COMPLETED", found: result.documents.length + result.places.length, screened,
+          platformFunnel: { returned: result.returned, outsideWindow: result.outsideWindow, unreadable: result.unreadable, repeated: result.repeated, assessed: result.documents.length, created, duplicates, updated, prospectsCreated: prospects?.created ?? 0, prospectsKnown: prospects?.known ?? 0, usageUsd: Math.round(result.usageUsd * 1000) / 1000, runs: result.runs },
+          resultClass: PLATFORMS[provider].resultClass,
+          ...(partialMessage || result.notes.length ? { message: [partialMessage, ...result.notes].filter(Boolean).join(" ") } : {}) };
+        await saveProviderCheckpoint(workspaceId, searchId, provider, { outcome: outcomes[provider] });
+        await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: partial ? "PARTIAL" : "COMPLETED", recordsFound: result.returned, recordsCreated: created + (prospects?.created ?? 0), recordsUpdated: updated, duplicates, credits: result.usageUsd, error: partialMessage, finishedAt: new Date() } });
+      } catch (error) {
+        const message = error instanceof PartialDiscoveryError ? error.message : "This platform's discovery failed unexpectedly. Results already saved are kept; resume the search to continue.";
+        outcomes[provider] = { status: "ERROR", found: 0, message };
+        await db.providerSync.update({ where: { id: sync.id, workspaceId }, data: { state: "FAILED", error: message, finishedAt: new Date() } });
+      }
+      await db.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { progress: Math.min(90, 10 + Math.round(Object.keys(outcomes).length / search.providers.length * 80)), providerResults: outcomes as Prisma.InputJsonValue, found } });
+      continue;
+    }
     try {
       const adapter = discoveryProvider(workspaceId, provider, providerConfigSchema.parse(connection.config), connection.encryptedCredentials ? decryptCredential(connection.encryptedCredentials, workspaceId, provider) : undefined);
       let documents: SourceDocument[]; let partial = false;
@@ -204,6 +241,7 @@ export async function discoverOpportunities(workspaceId: string, searchId: strin
     const current = await tx.opportunitySearch.findFirst({ where: { id: searchId, workspaceId } });
     if (current?.finishedAt) return;
     await tx.opportunitySearch.update({ where: { id: searchId, workspaceId }, data: { state, progress: 100, found, qualified, providerResults: outcomes as Prisma.InputJsonValue, finishedAt: new Date(), error: state === "FAILED" ? "Search could not complete. Inspect source status." : null, steps: { queryExpansion: "completed", sourceDiscovery: state.toLowerCase(), deduplication: "completed", companyResolution: "completed", scoring: "completed", enrichment: "not_requested" } } });
+    await finishPhraseRun(tx, search, state, found);
     if (search.savedSearchId && qualified) {
       const currentResults = await tx.opportunitySearchResult.findMany({ where: { workspaceId, searchId }, select: { opportunityId: true } });
       const previousResults = await tx.opportunitySearchResult.findMany({ where: { workspaceId, opportunityId: { in: currentResults.map(r => r.opportunityId) }, search: { workspaceId, savedSearchId: search.savedSearchId, id: { not: searchId }, finishedAt: { not: null } } }, select: { opportunityId: true } });

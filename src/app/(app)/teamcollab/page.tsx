@@ -6,6 +6,8 @@ import { dealsWithoutPlan, listDealPlans, listPlanTemplates } from "@/lib/servic
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { TeamCollabView } from "@/components/admin/teamcollab-view";
 import { PlansList } from "@/components/plans/plans-list";
+import { TeamLoad } from "@/components/plans/team-load";
+import { teamLoad } from "@/lib/services/team-routing";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "TeamCollab" };
@@ -26,7 +28,7 @@ export default async function TeamCollabPage({ searchParams }: { searchParams: P
         ))}
       </nav>
       {tab === "plans"
-        ? <PlansList plans={await listDealPlans(ctx)} candidates={await dealsWithoutPlan(ctx)} templates={await listPlanTemplates(ctx)} canConfigure={ctx.permissions.includes(PERMISSIONS.PIPELINE_CONFIGURE)} />
+        ? <><TeamLoad members={await teamLoad(ctx)} /><PlansList plans={await listDealPlans(ctx)} candidates={await dealsWithoutPlan(ctx)} templates={await listPlanTemplates(ctx)} canConfigure={ctx.permissions.includes(PERMISSIONS.PIPELINE_CONFIGURE)} /></>
         : <TeamCollabView notes={await listStickyNotes(ctx)} />}
     </div>
   );

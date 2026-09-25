@@ -149,7 +149,7 @@ export function canActuallySend(): boolean {
 }
 
 export const REPLIES_NOT_READABLE =
-  "The connected provider can send but cannot read replies, so stop-on-reply cannot be " +
-  "honoured automatically. Enrolling leads is blocked until a mailbox that supports reading " +
-  "is connected, because a sequence that keeps emailing someone who already answered is the " +
-  "fastest way to lose them.";
+  "No mailbox is connected for reading replies, so stop-on-reply cannot be honoured " +
+  "automatically. Connect one in Settings → Email Accounts → Reply reading; until then enrolling " +
+  "into this sequence is blocked, because a sequence that keeps emailing someone who already " +
+  "answered is the fastest way to lose them.";

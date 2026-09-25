@@ -1,3 +1,4 @@
+import { listMailboxes, readsReplies } from "@/lib/services/mailboxes";
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/context";
 import {
@@ -5,10 +6,11 @@ import {
   EMAIL_PROVIDERS,
   activeEmailProvider,
   canActuallySend,
-  canReceiveReplies,
 } from "@/lib/outreach/provider";
 import { getChannelReach } from "@/lib/services/channels";
 import { EmailAccountsView } from "@/components/integrations/email-accounts-view";
+import { MailboxesPanel } from "@/components/integrations/mailboxes-panel";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 
 export const metadata: Metadata = { title: "Email Accounts" };
 
@@ -40,6 +42,7 @@ const DOMAIN_CHECKS = [
 
 export default async function EmailAccountsPage() {
   const ctx = await requireAuth();
+  const [replies, mailboxes] = await Promise.all([readsReplies(ctx.workspaceId), listMailboxes(ctx)]);
   const reach = await getChannelReach(ctx, "email");
 
   return (
@@ -50,9 +53,11 @@ export default async function EmailAccountsPage() {
       }))}
       active={activeEmailProvider()}
       canSend={canActuallySend()}
-      canReceive={canReceiveReplies()}
+      canReceive={replies}
       reach={reach}
       domainChecks={DOMAIN_CHECKS}
-    />
+    >
+      <MailboxesPanel initial={mailboxes} canManage={ctx.permissions.includes(PERMISSIONS.WORKSPACE_MANAGE)} />
+    </EmailAccountsView>
   );
 }

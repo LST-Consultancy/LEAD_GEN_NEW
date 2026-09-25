@@ -7,6 +7,7 @@ import { JOB } from "@/lib/queue/jobs";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { parseDiscoveryOptions } from "@/lib/opportunities/linkedin-plan";
+import { runDuePhraseWatches } from "./phrase-watches";
 export async function refreshOpportunityWatches(workspaceId: string) {
   await db.discoveryCandidate.deleteMany({ where: { workspaceId, expiresAt: { lte: new Date() } } });
   // Purge source text when its licensed retention window ends, including derived versions.
@@ -37,5 +38,6 @@ export async function refreshOpportunityWatches(workspaceId: string) {
     const result = await enqueue(JOB.OPPORTUNITY_DISCOVERY, { workspaceId, searchId: search.id }, { dedupeKey: search.id, dedupeWindowSec: 0 });
     if (result.queued) queued++;
   }
-  return { queued };
+  const phrases = await runDuePhraseWatches(workspaceId);
+  return { queued, phrasesStarted: phrases.started, phrasesSkipped: phrases.skipped.length };
 }

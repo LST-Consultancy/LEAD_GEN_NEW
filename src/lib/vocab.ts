@@ -331,3 +331,15 @@ export const OPPORTUNITY_TYPE_LABEL: Record<string, string> = {
   DIGITAL_TRANSFORMATION: "Digital transformation",
   UNKNOWN: "Not classified",
 };
+
+/** Buying-committee roles as a person reads them. */
+export const COMMITTEE_ROLE_LABEL: Record<string, string> = {
+  CHAMPION: "Champion",
+  DECISION_MAKER: "Decision maker",
+  INFLUENCER: "Influencer",
+  TECHNICAL_EVALUATOR: "Technical evaluator",
+  FINANCE: "Finance",
+  PROCUREMENT: "Procurement",
+  BLOCKER: "Blocker",
+  UNKNOWN: "Role unknown",
+};

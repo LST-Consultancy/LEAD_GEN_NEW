@@ -80,6 +80,7 @@ export async function generateAccountPlan(
     where: { id: input.companyId, workspaceId: ctx.workspaceId, deletedAt: null },
     include: {
       committee: {
+        where: { removedAt: null },
         orderBy: { influence: "desc" },
         select: {
           role: true,

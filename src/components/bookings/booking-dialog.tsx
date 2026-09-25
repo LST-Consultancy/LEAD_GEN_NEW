@@ -35,6 +35,7 @@ export function NewMeetingButton({ bookingUrl }: { bookingUrl: string | null }) 
   const [location, setLocation] = React.useState("");
   const [meetingUrl, setMeetingUrl] = React.useState("");
   const [agenda, setAgenda] = React.useState("");
+  const [invite, setInvite] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState("");
 
@@ -51,7 +52,7 @@ export function NewMeetingButton({ bookingUrl }: { bookingUrl: string | null }) 
     try {
       const r = await bookingsApi.create({
         ...(lead ? { leadId: lead.id } : {}), title: title.trim(), ...s, timezone: viewerTz(),
-        ...(location.trim() ? { location: location.trim() } : {}), ...(meetingUrl.trim() ? { meetingUrl: meetingUrl.trim() } : {}), ...(agenda.trim() ? { agenda: agenda.trim() } : {}),
+        ...(location.trim() ? { location: location.trim() } : {}), ...(meetingUrl.trim() ? { meetingUrl: meetingUrl.trim() } : {}), ...(agenda.trim() ? { agenda: agenda.trim() } : {}), invite: Boolean(lead) && invite,
       }) as { note?: string; clash?: string | null };
       toast.success("Meeting booked", { description: r.clash ?? r.note });
       setOpen(false); router.refresh();
@@ -98,6 +99,7 @@ export function NewMeetingButton({ bookingUrl }: { bookingUrl: string | null }) 
             <Field label="Location" htmlFor="nm-loc"><Input id="nm-loc" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={300} /></Field>
             <Field label="Meeting link" htmlFor="nm-url"><Input id="nm-url" type="url" value={meetingUrl} onChange={(e) => setMeetingUrl(e.target.value)} maxLength={500} placeholder="https://meet.google.com/…" /></Field>
             <Field label="Agenda" htmlFor="nm-agenda"><Textarea id="nm-agenda" rows={3} value={agenda} onChange={(e) => setAgenda(e.target.value)} maxLength={5000} /></Field>
+            {lead ? <label className="flex items-start gap-2 text-xs text-secondary"><input type="checkbox" checked={invite} onChange={(e) => setInvite(e.target.checked)} className="mt-0.5" /><span>Send an invitation to {lead.name} from my connected calendar. Off by default: an invitation is an email to them. Without a connected calendar nothing is sent either way.</span></label> : null}
             {error ? <p className="text-xs text-danger-text">{error}</p> : null}
           </DialogBody>
           <DialogFooter>

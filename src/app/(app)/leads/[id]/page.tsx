@@ -16,6 +16,9 @@ import {
   TasksAndNotes,
 } from "@/components/leads/dossier/side-panels";
 import { BattlecardPanel } from "@/components/leads/dossier/battlecard";
+import { WhatsAppCard } from "@/components/leads/dossier/whatsapp-card";
+import { LeadVoiceNote } from "@/components/voice/lead-voice-note";
+import { whatsappForLead } from "@/lib/services/whatsapp";
 
 export async function generateMetadata({
   params,
@@ -104,7 +107,9 @@ export default async function LeadDossierPage({
           <div className="min-w-0 space-y-3">
             <NextBestActions leadId={lead.id} actions={lead.nextBestActions} />
             <DealsPanel leadId={lead.id} companyName={lead.company.name} deals={lead.deals} />
+            <WhatsAppCard leadId={lead.id} info={await whatsappForLead(ctx, lead.id)} />
             <BattlecardPanel leadId={lead.id} />
+            <LeadVoiceNote leadId={lead.id} />
             <TasksAndNotes tasks={lead.tasks} notes={lead.notes} leadId={lead.id} />
             <RelationshipMemory memory={lead.person.memory} />
             <CompanyPanel

@@ -11,6 +11,8 @@ import { Avatar } from "@/components/ui/avatar";
 import { api } from "@/lib/api/client";
 import { formatNumber } from "@/lib/format";
 import { TIER } from "@/lib/vocab";
+import { ExternalLookup, RecentLookups } from "./external-lookup";
+import type { leadLensReadiness } from "@/lib/services/lead-lens";
 
 type Result = {
   query: string;
@@ -44,7 +46,7 @@ const KIND_LABEL: Record<string, string> = {
   url: "a LinkedIn URL",
 };
 
-export function LeadLensView({ enrichmentAvailable }: { enrichmentAvailable: boolean }) {
+export function LeadLensView({ readiness }: { readiness: Awaited<ReturnType<typeof leadLensReadiness>> }) {
   const [q, setQ] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -71,15 +73,13 @@ export function LeadLensView({ enrichmentAvailable }: { enrichmentAvailable: boo
         </p>
       </div>
 
-      {!enrichmentAvailable ? (
-        <div className="rounded-lg border border-warning-border bg-warning-surface px-3 py-2 text-xs text-warning-text">
-          <ShieldOff className="mr-1 inline size-3.5" />
-          <strong>This looks up what you already hold.</strong> Looking up someone you have
-          never seen is not built yet. To find new people at a company, open one of its
-          opportunities and use Find people. A miss below means the person is not in your data,
-          not that they do not exist.
-        </div>
-      ) : null}
+      <div className="rounded-lg border border-border px-3 py-2 text-xs text-secondary">
+        <ShieldOff className="mr-1 inline size-3.5" />
+        <strong className="text-primary">Look up first searches what you already hold.</strong>{" "}
+        For a LinkedIn profile, company page or domain you can then look it up outside the workspace:
+        profiles through {readiness.personProviders.length ? readiness.personProviders.join(" or ") : "SignalHire or Apollo (not connected)"}, companies through{" "}
+        {readiness.companyReady ? "your Apify account" : "Apify (no token saved)"}. A bare name is searched in this workspace only.
+      </div>
 
       <Card>
         <CardContent className="py-3">
@@ -108,6 +108,8 @@ export function LeadLensView({ enrichmentAvailable }: { enrichmentAvailable: boo
         </CardContent>
       </Card>
 
+      {result && result.kind !== "too_short" ? <ExternalLookup key={result.query} query={result.query} readiness={readiness} /> : null}
+      {!result ? <RecentLookups recent={readiness.recent} /> : null}
       {result ? (
         <>
           <p className="text-2xs text-muted">

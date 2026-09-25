@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth/context";
+import { listClaimable } from "@/lib/services/lead-claims";
+import { ClaimQueue } from "@/components/leads/claim-queue";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import {
   getFilterFacets,
@@ -21,10 +23,12 @@ export default async function LeadsPage({
   const ctx = await requireAuth();
   const { filter, shortcut } = parseLeadParams(await searchParams);
 
-  const [result, shortcutCounts, facets] = await Promise.all([
+  const [result, shortcutCounts, facets, claimable] = await Promise.all([
     listLeads(ctx, filter),
     getShortcutCounts(ctx),
     getFilterFacets(ctx),
+    // Reps who see only their own leads get the claim queue; managers already see unowned leads in the list.
+    ctx.permissions.includes(PERMISSIONS.LEADS_EDIT) && !ctx.permissions.includes(PERMISSIONS.LEADS_VIEW_ALL) ? listClaimable(ctx) : null,
   ]);
 
   const viewCookie = (await cookies()).get("sr_leads_view")?.value;
@@ -32,6 +36,8 @@ export default async function LeadsPage({
     viewCookie === "cards" || viewCookie === "compact" ? viewCookie : "table";
 
   return (
+    <>
+    {claimable ? <div className="px-3 pt-3 sm:px-4"><ClaimQueue initial={claimable} /></div> : null}
     <LeadsView
       rows={result.rows}
       total={result.total}
@@ -51,5 +57,6 @@ export default async function LeadsPage({
         edit: ctx.permissions.includes(PERMISSIONS.LEADS_EDIT),
       }}
     />
+    </>
   );
 }

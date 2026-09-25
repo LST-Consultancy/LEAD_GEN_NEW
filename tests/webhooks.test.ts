@@ -34,10 +34,11 @@ describe("the event catalogue", () => {
     }
   });
 
-  it("says reply events come from replies logged by hand, since no mailbox reader exists", () => {
+  it("says reply events come from a connected mailbox or a reply logged by hand, and which", () => {
     const reply = WEBHOOK_EVENTS.find((e) => e.key === "message.replied")!;
     expect(reply.emitted).toBe(true);
-    expect(reply.note).toMatch(/logged by hand/);
+    expect(reply.note).toMatch(/connected mailbox/);
+    expect(reply.note).toMatch(/logged on a lead by hand \(loggedByHand: true\)/);
   });
 
   it("counts emitted against total", () => {

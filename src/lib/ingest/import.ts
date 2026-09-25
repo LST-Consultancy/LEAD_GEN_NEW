@@ -33,6 +33,8 @@ export const importRowSchema = z.object({
   industry: z.string().trim().max(120).optional(),
   city: z.string().trim().max(120).optional(),
   state: z.string().trim().max(120).optional(),
+  /** When the list does not say, the country is recorded as unknown — never assumed. */
+  country: z.string().trim().max(120).optional(),
   employeeCount: z.coerce.number().int().min(0).max(10_000_000).optional(),
   note: z.string().trim().max(1000).optional(),
 });
@@ -178,7 +180,7 @@ export async function importLeads(
             city: row.city ?? null,
             state: row.state ?? null,
             employeeCount: row.employeeCount ?? null,
-            country: "India",
+            country: row.country || "Unknown",
             technologies: [],
             tags: ["imported"],
           },
@@ -253,7 +255,7 @@ export async function importLeads(
             linkedinUrl: row.linkedinUrl || null,
             city: row.city ?? null,
             state: row.state ?? null,
-            country: "India",
+            country: row.country || "Unknown",
             languages: [],
           },
         });
@@ -522,6 +524,7 @@ export function parseDelimited(text: string): {
     industry: ["industry", "sector", "vertical"],
     city: ["city", "location", "town"],
     state: ["state", "region", "province"],
+    country: ["country", "nation", "country name"],
     employeeCount: ["employees", "employee count", "headcount", "size", "staff"],
     note: ["note", "notes", "comment", "comments", "context"],
   };

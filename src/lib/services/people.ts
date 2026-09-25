@@ -23,8 +23,26 @@ const filtersSchema = z.object({
   decisionMakersOnly: z.boolean().default(false),
   hasContact: z.enum(["any", "revealed", "locked", "none"]).default("any"),
   minIntent: z.number().int().min(0).max(100).default(0),
+  /** How the person entered the workspace, from the employment's recorded source. */
+  origin: z.enum(["any", "post_author", "enrichment", "lookup", "import"]).default("any"),
+  /** Their company has an open request for an outside provider (vendor, RFP, outsourcing…). */
+  buyerSide: z.boolean().default(false),
+  /** Their company is moving off something: a migration request, or a recorded technology change. */
+  switching: z.boolean().default(false),
+  /** Only buying requests seen within this many days count for the two filters above. */
+  withinDays: z.number().int().min(1).max(365).default(90),
+  association: z.enum(["any", "current", "uncertain"]).default("any"),
   limit: z.number().int().min(1).max(200).default(50),
 });
+
+const BUYING_TYPES = ["EXTERNAL_VENDOR", "RFP", "OUTSOURCING", "STAFF_AUGMENTATION", "IMPLEMENTATION", "INTEGRATION", "CONSULTING", "MIGRATION", "PROJECT"] as const;
+const CLOSED_STATUSES = ["CLOSED", "EXPIRED", "AWARDED", "CANCELLED"] as const;
+const ORIGIN_SOURCE: Record<string, object> = {
+  post_author: { source: "post_author" },
+  enrichment: { source: { startsWith: "apify:" } },
+  lookup: { source: { startsWith: "lookup:" } },
+  import: { OR: [{ source: null }, { source: { in: ["import", "manual", "csv"] } }] },
+};
 
 export type PeopleFilters = z.input<typeof filtersSchema>;
 
@@ -39,11 +57,23 @@ export async function findPeople(ctx: AuthContext, raw: PeopleFilters = {}) {
       ...(f.decisionMakersOnly ? { isDecisionMaker: true } : {}),
       ...(f.seniority.length > 0 ? { seniority: { in: f.seniority } } : {}),
       ...(f.department.length > 0 ? { department: { in: f.department } } : {}),
+      ...(f.origin !== "any" ? ORIGIN_SOURCE[f.origin] : {}),
+      ...(f.association !== "any" ? { association: f.association } : {}),
+      // Lead attachment and contact state are filtered in SQL, so the limit counts only matching rows.
+      ...(f.attachment === "is_lead" ? { person: { leads: { some: { workspaceId: ctx.workspaceId, deletedAt: null, ...visible } } } } : {}),
+      ...(f.attachment === "not_lead" ? { person: { leads: { none: { workspaceId: ctx.workspaceId, deletedAt: null, ...visible } } } } : {}),
       company: {
         deletedAt: null,
         ...(f.industry.length > 0 ? { industry: { in: f.industry } } : {}),
         ...(f.state.length > 0 ? { state: { in: f.state } } : {}),
         ...(f.minIntent > 0 ? { intentScore: { gte: f.minIntent } } : {}),
+        AND: [
+          ...(f.buyerSide ? [{ opportunities: { some: { workspaceId: ctx.workspaceId, deletedAt: null, status: { notIn: [...CLOSED_STATUSES] }, types: { hasSome: [...BUYING_TYPES] }, discoveredAt: { gte: new Date(Date.now() - f.withinDays * 86_400_000) } } } }] : []),
+          ...(f.switching ? [{ OR: [
+            { opportunities: { some: { workspaceId: ctx.workspaceId, deletedAt: null, types: { has: "MIGRATION" as const }, discoveredAt: { gte: new Date(Date.now() - f.withinDays * 86_400_000) } } } },
+            { signals: { some: { workspaceId: ctx.workspaceId, type: "TECH_CHANGE" as const, occurredAt: { gte: new Date(Date.now() - f.withinDays * 86_400_000) } } } },
+          ] }] : []),
+        ],
       },
       ...(f.q
         ? {
@@ -131,8 +161,6 @@ export async function findPeople(ctx: AuthContext, raw: PeopleFilters = {}) {
       };
     })
     .filter((r) => {
-      if (f.attachment === "is_lead" && !r.lead) return false;
-      if (f.attachment === "not_lead" && r.lead) return false;
       if (f.hasContact === "revealed" && r.contacts.revealed === 0) return false;
       if (f.hasContact === "locked" && r.contacts.locked === 0) return false;
       if (f.hasContact === "none" && r.contacts.revealed + r.contacts.locked > 0) return false;
@@ -150,8 +178,7 @@ export async function findPeople(ctx: AuthContext, raw: PeopleFilters = {}) {
     /**
      * Stated on every result set: this searched your workspace, nothing more.
      */
-    // Searching people outside the workspace is not built; enrichment runs per company from an opportunity.
-    scope: "People already in your workspace. To find new people at a company, open one of its opportunities and use Find people.",
+    scope: "People already in your workspace. To add someone new, look up their LinkedIn profile in Lead Lens, or open one of their company's opportunities and use Find people.",
     externalSearchAvailable: false,
   };
 }
@@ -228,6 +255,7 @@ export async function listAccounts(
     include: {
       opportunities: { where: { workspaceId: ctx.workspaceId, deletedAt: null }, select: { id: true, title: true, intentScore: true, status: true }, take: 10, orderBy: { intentScore: "desc" } },
       committee: {
+        where: { removedAt: null },
         orderBy: { influence: "desc" },
         select: {
           role: true,

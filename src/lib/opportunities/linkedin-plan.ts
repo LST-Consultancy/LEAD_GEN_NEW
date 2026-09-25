@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { routingSchema } from "./offering";
 import type { SearchCriteria } from "./query-parser";
 
 /**
@@ -55,6 +56,8 @@ export const discoveryOptionsSchema = z.object({
   strictFilters: z.boolean().default(false),
   /** A person's edit of the planned queries. Replaces the generated plan when present. */
   queries: z.array(z.string().trim().min(3).max(300)).max(24).optional(),
+  /** Set when the search was started from an offering profile: which phrases go to which platform. */
+  routing: routingSchema.optional(),
 });
 export type DiscoveryOptions = z.infer<typeof discoveryOptionsSchema>;
 export type ResolvedOptions = { depth: Depth; maxQueries: number; maxPagesPerQuery: number; postsPerPage: number; maxPosts: number; targetQualified: number; maxRuntimeSec: number; strictFilters: boolean; queries?: string[]; cappedBy: number | null };

@@ -30,10 +30,10 @@ type Saved = {
 };
 
 /** Opens the search with its stored filter restored, not just the screen it came from. */
-function searchHref(s: Pick<Saved, "surface" | "filter" | "broken">): string {
+function searchHref(s: Pick<Saved, "id" | "surface" | "filter" | "broken">): string {
   if (s.surface === "leads") return s.broken ? "/leads" : `/leads${buildLeadQuery((s.filter ?? {}) as Partial<LeadFilter>)}`;
-  // Opportunity watches run on a schedule; Find Opportunities is where they are made and re-run.
-  if (s.surface === "opportunities") return "/find-leads";
+  // Opportunity watches run on a schedule; opening one restores its query, sources and options.
+  if (s.surface === "opportunities") return `/find-leads?watch=${s.id}`;
   return `/${s.surface}`;
 }
 

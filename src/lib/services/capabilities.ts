@@ -20,10 +20,10 @@ export type ProviderReadiness = { id: string; name: string; state: "healthy" | "
 export type Capability = { operation: Operation; state: CapabilityState; providers: ProviderReadiness[]; detail: string; setupHref: string | null };
 
 const OPERATIONS: Record<Operation, { providers: string[]; needs: ("allowedSearch" | "allowedEnrichment" | "allowedStorage")[]; label: string; whereToUse: string; unbuilt?: string }> = {
-  opportunity_discovery: { providers: ["brave", "linkedin_posts", "greenhouse", "lever", "ashby", "adzuna"], needs: ["allowedSearch", "allowedStorage"], label: "Opportunity discovery", whereToUse: "Find Opportunities" },
+  opportunity_discovery: { providers: ["brave", "linkedin_posts", "greenhouse", "lever", "ashby", "adzuna", "apify_linkedin_jobs", "apify_indeed", "apify_naukri", "apify_google_search", "apify_reddit", "apify_upwork", "apify_google_maps", "apify_websites"], needs: ["allowedSearch", "allowedStorage"], label: "Opportunity discovery", whereToUse: "Find Opportunities" },
   // Apify enrichment is listed first: it is the workflow on the opportunity screen. Hunter and
   // SignalHire stay available to API callers of the older routes, and are never used silently.
-  contact_enrichment: { providers: ["apify_enrichment", "hunter", "signalhire"], needs: ["allowedEnrichment", "allowedStorage"], label: "Finding people and emails at a company", whereToUse: "Find people and Find emails on an opportunity" },
+  contact_enrichment: { providers: ["apify_enrichment", "hunter", "signalhire", "apollo"], needs: ["allowedEnrichment", "allowedStorage"], label: "Finding people and emails at a company", whereToUse: "Find people and Find emails on an opportunity" },
   email_verification: { providers: ["apify_enrichment", "hunter"], needs: ["allowedEnrichment", "allowedStorage"], label: "Email checks", whereToUse: "Check emails on an opportunity" },
   phrase_watching: { providers: [], needs: [], label: "Search-phrase watching", whereToUse: "", unbuilt: "Search phrases are not fetched by any connected provider yet. To watch for new demand, save a watch on Find Opportunities — those run on your connected sources." },
   person_lookup: { providers: [], needs: [], label: "Standalone person lookup", whereToUse: "", unbuilt: "Looking up someone who is not already in this workspace is not built. Find people at a company from one of its opportunities instead." },

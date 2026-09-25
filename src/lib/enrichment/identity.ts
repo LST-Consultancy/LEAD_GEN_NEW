@@ -109,8 +109,13 @@ export function searchCandidates(hits: SearchHit[], name: string) {
 }
 
 // ── Company profiles (harvestapi/linkedin-company) ──────────────────────────────────────────────
-export type CompanyProfile = { linkedinUrl: string; name: string; website: string | null; domain: string | null; description: string | null; industry: string | null; employeeCount: number | null; employeeBand: string | null; city: string | null; state: string | null; country: string | null };
-/** Fields as in the Actor's documented example: linkedinUrl, name, website, description, industries[], employeeCount, employeeCountRange.start, locations[{headquarter, parsed}]. */
+export type CompanyProfile = { linkedinUrl: string; name: string; website: string | null; domain: string | null; description: string | null; industry: string | null; employeeCount: number | null; employeeBand: string | null; city: string | null; state: string | null; country: string | null; phone?: string | null };
+/**
+ * Fields as the Actor returns them (checked against a recorded dataset, not only its documented
+ * example): linkedinUrl, name, website, description, industries[] as objects {name, title} (or
+ * plain strings), employeeCount, employeeCountRange.start, locations[{headquarter, parsed}],
+ * phone as {number} (or a string).
+ */
 export function mapCompanyProfile(item: unknown): CompanyProfile | null {
   const r = (item ?? {}) as Record<string, unknown>;
   const linkedinUrl = linkedInCompanyUrl(typeof r.linkedinUrl === "string" ? r.linkedinUrl : null);
@@ -125,10 +130,19 @@ export function mapCompanyProfile(item: unknown): CompanyProfile | null {
   const start = typeof range.start === "number" ? range.start : null; const end = typeof range.end === "number" ? range.end : null;
   return {
     linkedinUrl, name, website, domain: companyDomain(website),
-    description: str(r.description) ?? str(r.tagline), industry: Array.isArray(r.industries) ? str(r.industries[0]) : null,
+    description: str(r.description) ?? str(r.tagline), industry: industryOf(r.industries),
     employeeCount: typeof r.employeeCount === "number" ? r.employeeCount : null, employeeBand: start !== null ? (end !== null ? `${start}–${end}` : `${start}+`) : null,
-    city: str(parsed.city) ?? str(hq?.city), state: str(parsed.state), country: str(parsed.country) ?? str(hq?.country),
+    city: str(parsed.city) ?? str(hq?.city), state: str(parsed.state), country: str(parsed.countryFull) ?? str(parsed.country) ?? str(hq?.country),
+    phone: str(r.phone) ?? str((r.phone as { number?: unknown } | null)?.number),
   };
+}
+function industryOf(v: unknown): string | null {
+  if (!Array.isArray(v) || !v.length) return null;
+  const first = v[0] as unknown;
+  if (typeof first === "string") return first.trim() || null;
+  const o = (first ?? {}) as { name?: unknown; title?: unknown };
+  const n = typeof o.name === "string" ? o.name : typeof o.title === "string" ? o.title : null;
+  return n?.trim() || null;
 }
 
 // ── Scoring ──────────────────────────────────────────────────────────────────────────────────────

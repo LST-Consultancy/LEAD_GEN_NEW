@@ -32,6 +32,12 @@ const RESTORABLE: Record<string, { label: string; restore: (id: string) => Promi
       await db.lead.update({ where: { id }, data: { deletedAt: null } });
     },
   },
+  OfferingProfile: {
+    label: "Offering",
+    restore: async (id) => {
+      await db.offeringProfile.update({ where: { id }, data: { deletedAt: null } });
+    },
+  },
   KnowledgeDoc: {
     label: "Knowledge entry",
     restore: async (id) => {

@@ -1,5 +1,6 @@
 import { OpportunitySearchView } from "@/components/opportunities/search-view";
 import { listOpportunityProviders } from "@/lib/services/opportunity-providers";
+import { getOpportunityWatch } from "@/lib/services/opportunities";
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/context";
 import { db } from "@/lib/db";
@@ -9,15 +10,17 @@ import { FindView } from "@/components/find/find-view";
 
 export const metadata: Metadata = { title: "Find Opportunities" };
 
-export default async function FindLeadsPage() {
+export default async function FindLeadsPage({ searchParams }: { searchParams: Promise<{ watch?: string }> }) {
   const ctx = await requireAuth();
+  const { watch: watchId } = await searchParams;
+  const watch = watchId ? await getOpportunityWatch(ctx, watchId) : null;
   const [icpCount, capabilities] = await Promise.all([
     db.icpProfile.count({ where: { workspaceId: ctx.workspaceId, deletedAt: null } }),
     getCapabilities(ctx),
   ]);
 
   return (
-    <div className="space-y-8 p-6"><OpportunitySearchView providers={await listOpportunityProviders(ctx)} /><details><summary className="cursor-pointer text-sm">Import your existing leads</summary><FindView
+    <div className="space-y-8 p-6"><OpportunitySearchView providers={await listOpportunityProviders(ctx)} watch={watch} watchMissing={Boolean(watchId && !watch)} /><details><summary className="cursor-pointer text-sm">Import your existing leads</summary><FindView
       hasIcp={icpCount > 0}
       sources={{ available: availableSources(), pending: pendingSources(), connected: [...capabilities.opportunity_discovery.providers, ...capabilities.contact_enrichment.providers] }}
     /></details></div>

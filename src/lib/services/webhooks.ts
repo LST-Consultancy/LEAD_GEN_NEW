@@ -45,7 +45,7 @@ export const WEBHOOK_EVENTS: WebhookEvent[] = [
     label: "Reply received",
     describes: "Someone answered an outbound message.",
     emitted: true,
-    note: "Raised when a reply is logged on a lead. No mailbox reader is built, so replies are logged by hand; the payload says loggedByHand.",
+    note: "Raised when a connected mailbox's reply to a sent email is read (loggedByHand: false), or when a reply is logged on a lead by hand (loggedByHand: true). Automatic out-of-office answers and bounces do not raise it.",
   },
   {
     key: "deal.stage_changed",

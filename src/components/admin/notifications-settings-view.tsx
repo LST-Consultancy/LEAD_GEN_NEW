@@ -23,11 +23,15 @@ export function NotificationsSettingsView({
   windowDays,
   totalReceived,
   totalUnread,
+  emailAvailable,
+  emailAddress,
 }: {
   kinds: NotificationKindStat[];
   windowDays: number;
   totalReceived: number;
   totalUnread: number;
+  emailAvailable: boolean;
+  emailAddress: string;
 }) {
   const noisiest = kinds[0];
 
@@ -82,6 +86,7 @@ export function NotificationsSettingsView({
                   <th className="pb-1.5 text-right font-semibold">Unread</th>
                   <th className="pb-1.5 text-right font-semibold">Last</th>
                   <th className="pb-1.5 text-right font-semibold">In app</th>
+                  <th className="pb-1.5 text-right font-semibold">Email</th>
                 </tr>
               </thead>
               <tbody>
@@ -130,6 +135,9 @@ export function NotificationsSettingsView({
                     <td className="py-1.5 text-right">
                       <MuteSwitch kind={k.kind} label={k.label} muted={k.muted} />
                     </td>
+                    <td className="py-1.5 text-right">
+                      <EmailSwitch kind={k.kind} label={k.label} on={k.email} available={emailAvailable} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -141,8 +149,11 @@ export function NotificationsSettingsView({
       <p className="text-2xs leading-relaxed text-muted">
         <Info className="mr-0.5 inline size-2.5" />
         Notifications are per person, not per workspace — these counts are yours. A colleague who
-        owns different leads sees a different list. Email and push delivery are not built; these
-        arrive in the app only.
+        owns different leads sees a different list.{" "}
+        {emailAvailable
+          ? `Kinds with Email on are also sent to ${emailAddress} within about five minutes; one older than a day is not sent late.`
+          : "Email delivery needs a working mail provider on the server (SMTP_URL and EMAIL_FROM); until then these arrive in the app only."}{" "}
+        Push notifications are not built.
       </p>
     </div>
   );
@@ -164,4 +175,22 @@ function MuteSwitch({ kind, label, muted }: { kind: string; label: string; muted
     } finally { setPending(false); }
   }
   return <Switch aria-label={`${label} notifications`} checked={on} disabled={pending} onCheckedChange={(c) => void toggle(c)} />;
+}
+
+function EmailSwitch({ kind, label, on: initial, available }: { kind: string; label: string; on: boolean; available: boolean }) {
+  const router = useRouter();
+  const [on, setOn] = React.useState(initial);
+  const [pending, setPending] = React.useState(false);
+  async function toggle(next: boolean) {
+    setOn(next); setPending(true);
+    try {
+      await api.put("/api/notification-preferences", { kind, email: next });
+      toast.success(next ? `${label} will be emailed` : `${label} no longer emailed`);
+      router.refresh();
+    } catch (err) {
+      setOn(!next);
+      toast.error("Not saved", { description: `${err instanceof ApiError ? err.message : "The server didn't save it."} Put back as it was.` });
+    } finally { setPending(false); }
+  }
+  return <Switch aria-label={`Email ${label} notifications`} checked={on} disabled={pending || (!available && !on)} onCheckedChange={(c) => void toggle(c)} />;
 }

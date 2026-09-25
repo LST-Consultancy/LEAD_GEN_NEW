@@ -1,3 +1,4 @@
+import { readsReplies } from "./mailboxes";
 import "server-only";
 import { db } from "@/lib/db";
 import type { AuthContext } from "@/lib/auth/context";
@@ -7,10 +8,8 @@ import {
   isEmailConfigured,
   activeEmailProvider,
   canActuallySend,
-  canReceiveReplies,
 } from "@/lib/outreach/provider";
 import { isCalendarConfigured, canSyncCalendar } from "@/lib/services/bookings";
-import { isWhatsAppConfigured, WHATSAPP_ADAPTER_BUILT } from "@/lib/channels/whatsapp";
 import { RATE_LIMITS, rateLimit } from "@/lib/security/rate-limit";
 
 /**
@@ -31,6 +30,7 @@ export type SystemCheck = {
 export async function getSupportDiagnostics(
   ctx: AuthContext
 ): Promise<{ checks: SystemCheck[]; workspaceSlug: string }> {
+  const [replies, whatsapp] = await Promise.all([readsReplies(ctx.workspaceId), db.providerConnection.findUnique({ where: { workspaceId_provider: { workspaceId: ctx.workspaceId, provider: "whatsapp_cloud" } }, select: { enabled: true, encryptedCredentials: true, status: true } })]);
   const workspace = await db.workspace.findUniqueOrThrow({
     where: { id: ctx.workspaceId },
     select: { slug: true },
@@ -62,9 +62,9 @@ export async function getSupportDiagnostics(
       name: "Email sending",
       // Three states, because a credential without an adapter sends nothing and
       // looks identical to a working one unless it is said out loud.
-      state: canActuallySend() ? (canReceiveReplies() ? "ok" : "degraded") : "off",
+      state: canActuallySend() ? (replies ? "ok" : "degraded") : "off",
       detail: canActuallySend()
-        ? canReceiveReplies()
+        ? replies
           ? `${activeEmailProvider()} is connected and sending, and can read replies.`
           : `${activeEmailProvider()} is sending but cannot read replies, so enrolment stays blocked — a sequence that ignores a reply loses the lead.`
         : isEmailConfigured()
@@ -73,12 +73,10 @@ export async function getSupportDiagnostics(
     },
     {
       name: "WhatsApp",
-      state: WHATSAPP_ADAPTER_BUILT && isWhatsAppConfigured() ? "ok" : "off",
-      detail: WHATSAPP_ADAPTER_BUILT
-        ? isWhatsAppConfigured()
-          ? "Credentialled."
-          : "Adapter built, credentials missing."
-        : "Adapter not built. Consent and suppression are enforced; nothing sends.",
+      state: whatsapp?.enabled && whatsapp.encryptedCredentials ? (whatsapp.status === "ERROR" ? "degraded" : "ok") : "off",
+      detail: whatsapp?.enabled && whatsapp.encryptedCredentials
+        ? whatsapp.status === "ERROR" ? "Connected, but the last check against Meta failed. Re-check it in WhatsApp API settings." : "Connected through the Cloud API. Sends need a recorded opt-in; replies and receipts arrive by webhook."
+        : "Not connected. Consent and suppression are enforced; nothing sends.",
     },
     {
       name: "Calendar",

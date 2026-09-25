@@ -66,6 +66,13 @@ not chosen, and they pass in all-pairs mode in both themes.
 | LinkedIn pagination and stopping | `lib/opportunities/linkedin-run.ts` — pure; I/O is injected |
 | Running any Apify Actor | `lib/providers/apify.ts` — start, record, poll, page the dataset |
 | An enrichment rule (identity, people, emails, checks) | `lib/enrichment/*` — pure; the runner is `lib/services/enrichment-runner.ts` |
+| A contact-provider lookup (SignalHire, Hunter, Apollo) | `lib/providers/contact-lookup.ts`; the order and cap are in `lib/enrichment/fallback.ts` |
+| A new Apify discovery platform | `lib/opportunities/apify-platforms.ts` (plan and map, pure) and `apify-platform-meta.ts` (client-safe) |
+| Any Apify run outside an enrichment run | `runLedgeredActor` in `lib/providers/apify-ledger.ts`, with a unique `stageKey` |
+| A provider's inbound webhook | `/api/webhooks/inbound/<provider>`, verified by signature in the route, never a session |
+| Reading replies from a mailbox | `lib/services/mailboxes.ts`; gate stop-on-reply on `readsReplies(workspaceId)` |
+| A calendar event for a booking | `syncBookingEvent` in `lib/services/calendar.ts`; call it after the booking is saved, never instead of saving it |
+| A PDF download | `renderPdf` in `lib/pdf/simple.ts` |
 
 Prisma `Decimal` and `Date` must not cross into components. Convert once at the
 service boundary with `toPlain()` from `lib/serialize.ts`.
@@ -448,6 +455,26 @@ before believing that one.
 - **`api` in `lib/api/client.ts` had no `put`** while several routes were PUT,
   so nothing could call them. Add the method to both the `api` object and the
   method union in `request()`.
+- **Only signed inbound webhooks skip the Origin check.** A provider's server-to-server POST has no
+  Origin, so `checkOrigin` lets through `/api/webhooks/inbound/*` requests that carry a signature
+  header. The route must then verify that signature (for example `validSignature` for WhatsApp)
+  and must never read a session. Any other path still needs an Origin.
+- **Reading a mailbox must not change it.** IMAP sync uses `EXAMINE` and `BODY.PEEK`, so nothing is
+  marked read. `UID n:*` always returns the newest message, so filter to UIDs above the cursor.
+  A new UIDVALIDITY means the UIDs were renumbered: restart from the newest message, and don't
+  re-read the whole folder as new mail.
+- **An auto-reply is not a reply.** `classifyInbound` separates `reply`, `auto_reply` and `bounce`.
+  Only `reply` stops a stop-on-reply sequence.
+- **A discovery platform run is paid once.** Apify platform runs are ledgered under
+  `discovery:<searchId>:<provider>:<index>`. A resumed search reads that run instead of starting
+  another one.
+- **`Message.idempotencyKey` is globally unique.** Scope keys by workspace
+  (`inbound:<workspaceId>:<Message-ID>`), or two workspaces receiving the same email collide.
+- **`providerJson` takes `{ form, method }`.** Google's OAuth token endpoint needs a form-encoded
+  body, and Calendar needs PATCH and DELETE. A 204 response returns `{}`.
+- **A client component must not import `lib/opportunities/identity.ts`**, because it uses
+  `node:crypto`. Put anything a client needs into a separate client-safe module, as
+  `apify-platform-meta.ts` does.
 - **`.next/types` goes stale after adding a route.** A typecheck that
   complains a brand-new route "does not satisfy AppRouteHandlerRoutes" is
   reading a generated validator from before the file existed —

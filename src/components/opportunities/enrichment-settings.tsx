@@ -1,5 +1,6 @@
 "use client";
 import { Input } from "@/components/ui/input";
+import { FALLBACK_LABEL, FALLBACK_PROVIDERS, type FallbackProvider } from "@/lib/enrichment/fallback";
 import { DEFAULT_ACTORS, EMPLOYEE_MODES, estimate, money, PRICE_NOTE, type EnrichmentConfig } from "@/lib/enrichment/config";
 
 const ROLES: { key: keyof EnrichmentConfig["actors"]; label: string }[] = [
@@ -15,6 +16,10 @@ const select = "ml-2 rounded border border-border bg-surface p-1.5 text-sm";
 export function EnrichmentSettings({ value, onChange }: { value: EnrichmentConfig; onChange: (v: EnrichmentConfig) => void }) {
   const set = (patch: Partial<EnrichmentConfig>) => onChange({ ...value, ...patch });
   const num = (key: "peoplePerCompany" | "websitePages" | "emailChecksPerRun" | "verifyCacheDays" | "freshDays" | "runTimeoutSec", label: string, min: number, max: number, hint?: string) => <label className="block text-sm">{label}<Input type="number" min={min} max={max} value={value[key]} onChange={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= min && v <= max) set({ [key]: v }); }} className="mt-1 max-w-32 tabular-nums" />{hint && <span className="text-xs text-secondary">{hint}</span>}</label>;
+  const fb = value.fallback;
+  const setFb = (patch: Partial<EnrichmentConfig["fallback"]>) => set({ fallback: { ...fb, ...patch } });
+  const move = (p: FallbackProvider, dir: -1 | 1) => { const o = [...fb.order]; const i = o.indexOf(p); const j = i + dir; if (i < 0 || j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; setFb({ order: o }); };
+  const toggle = (p: FallbackProvider, on: boolean) => { const o = on ? [...fb.order, p] : fb.order.filter(x => x !== p); if (o.length) setFb({ order: o }); };
   return <fieldset className="space-y-4 rounded border border-border p-3">
     <legend className="px-1 text-sm font-medium">Apify enrichment</legend>
     <p className="text-xs text-secondary">Uses only Apify Actors, billed to your Apify account. The defaults were checked against each Actor&apos;s published input and output on 24 September 2026. Replace one only with an Actor that takes the same input and returns the same fields, or its results will not be read. {PRICE_NOTE}</p>
@@ -32,6 +37,18 @@ export function EnrichmentSettings({ value, onChange }: { value: EnrichmentConfi
       {num("runTimeoutSec", "Longest one Actor run may take (seconds)", 60, 600)}
     </div>
     <label className="block text-sm">Budget per run (USD)<Input type="number" min={0.05} max={50} step={0.05} value={value.maxUsdPerRun} onChange={e => { const v = Number(e.target.value); if (v >= 0.05 && v <= 50) set({ maxUsdPerRun: v }); }} className="mt-1 max-w-32 tabular-nums" /><span className="text-xs text-secondary">A step whose estimate would exceed what is left is skipped, and Apify is told the remaining amount as the run&apos;s charge limit.</span></label>
+    <div className="space-y-2 rounded border border-border p-3">
+      <label className="block text-sm"><input type="checkbox" checked={fb.enabled} onChange={e => setFb({ enabled: e.target.checked })} /> After Apify, ask contact providers for people still without a company email</label>
+      <p className="text-xs text-secondary">Uses your own SignalHire, Hunter and Apollo connections (each set up separately below), in this order, stopping for a person at the first one that returns an address. Each lookup can spend one of that provider&apos;s credits; they are billed by the provider, not estimated here. A provider that is not connected, or lacks what it needs for a person, is skipped and the run says why.</p>
+      {fb.enabled && <div className="space-y-2">
+        <ol className="space-y-1">{fb.order.map((p, i) => <li key={p} className="flex flex-wrap items-center gap-2 text-sm"><span className="tabular-nums text-secondary">{i + 1}.</span><span className="font-medium">{FALLBACK_LABEL[p]}</span>
+          <button type="button" className="rounded border border-border px-1.5 text-xs disabled:opacity-50" disabled={i === 0} onClick={() => move(p, -1)} aria-label={`Move ${FALLBACK_LABEL[p]} earlier`}>↑</button>
+          <button type="button" className="rounded border border-border px-1.5 text-xs disabled:opacity-50" disabled={i === fb.order.length - 1} onClick={() => move(p, 1)} aria-label={`Move ${FALLBACK_LABEL[p]} later`}>↓</button>
+          <button type="button" className="text-xs underline disabled:opacity-50" disabled={fb.order.length === 1} onClick={() => toggle(p, false)}>Don&apos;t use</button></li>)}</ol>
+        {FALLBACK_PROVIDERS.filter(p => !fb.order.includes(p)).map(p => <button key={p} type="button" className="mr-2 text-xs underline" onClick={() => toggle(p, true)}>Also use {FALLBACK_LABEL[p]}</button>)}
+        <label className="block text-sm">Provider lookups per run, across all providers<Input type="number" min={1} max={50} value={fb.maxLookupsPerRun} onChange={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 1 && v <= 50) setFb({ maxLookupsPerRun: v }); }} className="mt-1 max-w-32 tabular-nums" /></label>
+      </div>}
+    </div>
     <div className="space-y-2 rounded border border-border p-3">
       <label className="block text-sm"><input type="checkbox" checked={value.autoEnrich.enabled} onChange={e => set({ autoEnrich: { ...value.autoEnrich, enabled: e.target.checked } })} /> Enrich newly qualified opportunities automatically after a discovery search</label>
       {value.autoEnrich.enabled && <div className="grid gap-3 md:grid-cols-2">

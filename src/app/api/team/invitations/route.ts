@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getAuthContext } from "@/lib/auth/context";
-import { assignableRoles, createInvitation, invitationLink, listInvitations } from "@/lib/services/team";
+import { assignableRoles, createInvitation, emailInvitation, invitationLink, listInvitations } from "@/lib/services/team";
 import { handleApiError, unauthorized } from "@/lib/api/respond";
 
 export async function GET() {
@@ -14,13 +14,16 @@ export async function GET() {
   }
 }
 
-/** The link is in this response only. It is not emailed: no mail is sent from here. */
+/** The link is in this response only. It is emailed too when `sendEmail` is true and a mail provider works. */
 export async function POST(req: NextRequest) {
   try {
     const ctx = await getAuthContext();
     if (!ctx) return unauthorized();
-    const { token, ...inv } = await createInvitation(ctx, await req.json());
-    return NextResponse.json({ ...inv, link: invitationLink(req.nextUrl.origin, token) });
+    const body = (await req.json()) as { sendEmail?: boolean } & Record<string, unknown>;
+    const { token, ...inv } = await createInvitation(ctx, body as never);
+    const link = invitationLink(req.nextUrl.origin, token);
+    const delivery = body.sendEmail === true ? await emailInvitation(ctx, inv.id, link) : { emailed: false, note: null };
+    return NextResponse.json({ ...inv, link, ...delivery });
   } catch (err) {
     return handleApiError(err);
   }

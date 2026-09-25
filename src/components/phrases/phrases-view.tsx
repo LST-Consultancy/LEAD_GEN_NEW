@@ -14,6 +14,7 @@ import {
   Plus,
   Sparkles,
   Trash2,
+  RefreshCw,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -106,11 +107,11 @@ const VERDICT_META: Record<
 export function PhrasesView({
   phrases,
   verdicts,
-  ingestionConfigured,
+  watchability,
 }: {
   phrases: Phrase[];
   verdicts: Verdicts;
-  ingestionConfigured: boolean;
+  watchability: Record<string, { providers: string[]; reason: string | null }>;
 }) {
   const router = useRouter();
   const [creating, setCreating] = React.useState(false);
@@ -130,6 +131,18 @@ export function PhrasesView({
     { leads: 0, tierA: 0, wonInr: 0, wonCount: 0 }
   );
 
+  async function runNow(p: Phrase) {
+    setBusy(p.id);
+    try {
+      const r = await api.post<{ note: string | null }>(`/api/search-phrases/${p.id}/run`, {});
+      toast.success("Phrase run started", { description: r.note ?? `"${p.phrase}"` });
+      router.refresh();
+    } catch (e) {
+      toast.error("Could not run it", { description: e instanceof Error ? e.message : "Nothing was run or charged." });
+    } finally {
+      setBusy(null);
+    }
+  }
   async function toggle(p: Phrase) {
     setBusy(p.id);
     try {
@@ -177,17 +190,16 @@ export function PhrasesView({
         </Button>
       </header>
 
-      {/* §32 — ingestion needs a source. Say so rather than implying it runs. */}
-      {!ingestionConfigured ? (
+      {/* A phrase runs only where a matching discovery source is connected. Say which, per phrase. */}
+      {phrases.length > 0 && !Object.values(watchability).some(w => w.providers.length) ? (
         <Card className="border-warning-border bg-warning-subtle">
           <CardContent className="pt-3.5">
             <p className="flex items-start gap-2 text-xs leading-relaxed text-warning-text">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                <strong>Search phrases are not fetched by any provider yet</strong>, so these do
-                not discover anything on their own. Your connected providers run from Find
-                Opportunities — save a watch there to monitor for new demand. Scheduling and
-                per-phrase attribution below still work over data already in the workspace.
+                <strong>None of these phrases can run yet</strong>: no discovery source for their
+                kind is connected with search and storage rights. Each row says which to connect.
+                Attribution below still works over data already in the workspace.
               </span>
             </p>
           </CardContent>
@@ -328,6 +340,11 @@ export function PhrasesView({
                                 ) : null}
                                 {p.lastRunAt ? <span>ran {formatAge(p.lastRunAt)}</span> : null}
                               </p>
+                              <p className="text-2xs text-secondary">
+                                {watchability[p.id]?.providers.length
+                                  ? `Runs on ${watchability[p.id].providers.join(", ")}${p.isActive ? ` every ${p.cadenceHours}h` : " when resumed"}`
+                                  : watchability[p.id]?.reason ?? ""}
+                              </p>
                             </div>
                           </div>
                         </td>
@@ -407,6 +424,17 @@ export function PhrasesView({
                                 aria-label={p.isActive ? "Pause phrase" : "Resume phrase"}
                               >
                                 {p.isActive ? <Pause /> : <Play />}
+                              </Button>
+                            </Tooltip>
+                            <Tooltip content={watchability[p.id]?.providers.length ? "Run now" : watchability[p.id]?.reason ?? "Cannot run"}>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                disabled={busy === p.id || !watchability[p.id]?.providers.length}
+                                onClick={() => void runNow(p)}
+                                aria-label="Run phrase now"
+                              >
+                                <RefreshCw />
                               </Button>
                             </Tooltip>
                             <Tooltip content="Stop watching this phrase">

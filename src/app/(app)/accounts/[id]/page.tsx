@@ -4,6 +4,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireAuth } from "@/lib/auth/context";
 import { getAccount } from "@/lib/services/people";
+import { getCommittee } from "@/lib/services/committee";
+import { CommitteeEditor } from "@/components/intelligence/committee-editor";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { AccountDetail } from "@/components/intelligence/accounts-view";
 import { formatInrCompact, formatNumber } from "@/lib/format";
 
@@ -18,6 +21,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   // Outside the workspace and nonexistent are deliberately the same 404.
   const account = await getAccount(ctx, (await params).id);
   if (!account) notFound();
+  const committee = await getCommittee(ctx, account.id);
 
   const facts = [
     account.domain,
@@ -52,6 +56,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       </div>
+      <CommitteeEditor companyId={account.id} initial={committee} canEdit={ctx.permissions.includes(PERMISSIONS.LEADS_EDIT)} />
       <div className="rounded-lg border border-border bg-surface p-4">
         <AccountDetail account={account} />
       </div>

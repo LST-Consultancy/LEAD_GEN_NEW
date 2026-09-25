@@ -223,6 +223,7 @@ export async function createSearchPhrase(ctx: AuthContext, raw: PhraseInput) {
         workspaceId: ctx.workspaceId,
         ...input,
         createdByAi: false,
+        createdById: ctx.userId,
         nextRunAt: input.isActive ? new Date(Date.now() + 60_000) : null,
       },
     });

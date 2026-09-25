@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, Check, Info, MessageCircle, ShieldAlert, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, Check, Info, MessageCircle, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/format";
-import { WHATSAPP_RULES, type WhatsAppCredential } from "@/lib/channels/whatsapp";
+import { WHATSAPP_RULES } from "@/lib/channels/whatsapp";
+import type { whatsappStatus } from "@/lib/services/whatsapp";
+import { WhatsAppConnection } from "./whatsapp-connection";
 import type { ChannelReach } from "@/lib/services/channels";
 
 /**
@@ -20,14 +21,14 @@ import type { ChannelReach } from "@/lib/services/channels";
 export function WhatsAppView({
   variant,
   reach,
-  credentials,
-  adapterBuilt,
+  connection,
+  canManage,
   conversationCount,
 }: {
   variant: "channel" | "settings" | "api";
   reach: ChannelReach;
-  credentials: WhatsAppCredential[];
-  adapterBuilt: boolean;
+  connection: Awaited<ReturnType<typeof whatsappStatus>>;
+  canManage: boolean;
   conversationCount: number;
 }) {
   const title =
@@ -44,14 +45,16 @@ export function WhatsAppView({
         </p>
       </div>
 
-      <div className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2.5 text-xs text-warning-text">
-        <AlertTriangle className="mr-1 inline size-3.5" />
-        <strong>The WhatsApp adapter is not built, so nothing sends on this channel.</strong> No
-        credentials are needed yet, and none are charged for. What is already real: a stop recorded
-        against a number suppresses that person on{" "}
-        <em>every</em> channel, and the send-side rules below are enforced by Meta regardless of
-        what this product does.
-      </div>
+      {variant === "channel" ? (
+        <div className={`rounded-lg border px-3 py-2.5 text-xs ${connection.connected ? "border-border text-secondary" : "border-warning-border bg-warning-subtle text-warning-text"}`}>
+          {connection.connected ? <Check className="mr-1 inline size-3.5 text-success-text" /> : <AlertTriangle className="mr-1 inline size-3.5" />}
+          {connection.connected
+            ? <>WhatsApp is connected{connection.display ? <> ({connection.display})</> : null}. Send from a lead once their opt-in is recorded; replies and receipts arrive in the Inbox.</>
+            : <><strong>WhatsApp is not connected, so nothing sends on this channel.</strong> Connect your WhatsApp Business number in <Link href="/settings/whatsapp-api" className="underline">WhatsApp API settings</Link>. A stop recorded against a number already suppresses that person on every channel.</>}
+        </div>
+      ) : (
+        <WhatsAppConnection status={connection} canManage={canManage} />
+      )}
 
       <Card>
         <CardHeader className="flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -83,8 +86,8 @@ export function WhatsAppView({
           </div>
           <p className="mt-2 text-2xs leading-relaxed text-muted">
             {reach.reachable === 0
-              ? "No mobile numbers are recorded, so this channel would reach nobody even once it is built."
-              : `${formatNumber(reach.reachable)} numbers are recorded — but a number is not consent, and none of these people have opted in through this product.`}{" "}
+              ? "No mobile numbers are recorded, so this channel reaches nobody yet."
+              : `${formatNumber(reach.reachable)} numbers are recorded — but a number is not consent; only people whose opt-in is recorded, or who messaged first, can be sent to.`}{" "}
             {conversationCount > 0
               ? `${formatNumber(conversationCount)} WhatsApp conversations exist.`
               : "No WhatsApp conversation has ever been recorded here."}
@@ -109,43 +112,9 @@ export function WhatsAppView({
         </CardContent>
       </Card>
 
-      {variant !== "channel" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Credentials</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            <p className="text-2xs leading-relaxed text-muted">
-              Set in the server environment, never read back into this screen. Only presence is
-              shown. {adapterBuilt ? null : "Setting all four changes nothing today — the adapter that would use them is not written."}
-            </p>
-            {credentials.map((c) => (
-              <div
-                key={c.key}
-                className="rounded-md border border-border-subtle bg-surface-sunken px-2.5 py-2"
-              >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {c.present ? (
-                    <Check className="size-3 text-success-text" />
-                  ) : (
-                    <X className="size-3 text-muted" />
-                  )}
-                  <span className="text-xs font-medium text-primary">{c.label}</span>
-                  <span className="font-mono text-2xs text-muted">{c.key}</span>
-                  <Badge variant={c.present ? "success" : "neutral"} size="sm">
-                    {c.present ? "Present" : "Not set"}
-                  </Badge>
-                </div>
-                <p className="mt-0.5 text-2xs leading-relaxed text-secondary">{c.what}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Card>
         <CardHeader>
-          <CardTitle>What works today instead</CardTitle>
+          <CardTitle>Consent and hand-logged conversations</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 pt-0 text-2xs leading-relaxed text-secondary">
           <p>

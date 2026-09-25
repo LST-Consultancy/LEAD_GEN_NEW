@@ -1,4 +1,7 @@
 import "server-only";
+import { sendEmail } from "@/lib/outreach/transport";
+import { canActuallySend } from "@/lib/outreach/provider";
+import { fromAddress } from "./notification-email";
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -52,6 +55,24 @@ async function ownersOtherThan(workspaceId: string, excludingMemberId: string) {
 
 export function invitationLink(origin: string, token: string) {
   return `${origin.replace(/\/$/, "")}/invite/${token}`;
+}
+
+/**
+ * Emails an invitation link, when asked and a mail provider works. Records the outcome on the
+ * invitation either way; never throws, because the link shown on screen is enough to join.
+ */
+export async function emailInvitation(ctx: AuthContext, id: string, link: string) {
+  const inv = await db.invitation.findFirst({ where: { id, workspaceId: ctx.workspaceId }, include: { role: { select: { name: true } }, workspace: { select: { name: true } } } });
+  if (!inv) return { emailed: false, note: "Invitation not found." };
+  const from = fromAddress();
+  if (!canActuallySend() || !from.email.includes("@")) {
+    const why = "No working email provider is configured on this server, so the invitation was not emailed.";
+    await db.invitation.update({ where: { id }, data: { emailError: why } });
+    return { emailed: false, note: `${why} Send the link yourself.` };
+  }
+  const outcome = await sendEmail({ from, to: { email: inv.email }, replyTo: { email: ctx.user.email, name: ctx.user.name }, subject: `${ctx.user.name} invited you to ${inv.workspace.name} on Signalroom`, text: `${ctx.user.name} invited you to join ${inv.workspace.name} on Signalroom as ${inv.role.name}.\n\nJoin: ${link}\n\nThe link works once and expires on ${inv.expiresAt.toISOString().slice(0, 10)}. If you weren't expecting this, ignore this email.` });
+  await db.invitation.update({ where: { id }, data: outcome.ok ? { emailedAt: new Date(), emailError: null } : { emailError: outcome.reason.slice(0, 500) } });
+  return outcome.ok ? { emailed: true, note: `Emailed to ${inv.email}. The link below works too.` } : { emailed: false, note: `Could not email it: ${outcome.reason} Send the link yourself.` };
 }
 
 // ---------------------------------------------------------------------------

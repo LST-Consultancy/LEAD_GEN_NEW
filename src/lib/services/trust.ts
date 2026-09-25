@@ -1,3 +1,4 @@
+import { readsReplies } from "./mailboxes";
 import "server-only";
 import { db } from "@/lib/db";
 import { type AuthContext, leadVisibilityFilter } from "@/lib/auth/context";
@@ -7,7 +8,6 @@ import { isConfigured as isAiConfigured, activeProvider, MODEL_ROUTING } from "@
 import {
   isEmailConfigured,
   activeEmailProvider,
-  canReceiveReplies,
 } from "@/lib/outreach/provider";
 import { isCalendarConfigured, canSyncCalendar, activeCalendarProvider } from "@/lib/services/bookings";
 import { getCapabilities, isUsable } from "@/lib/services/capabilities";
@@ -185,6 +185,7 @@ export function summariseApprovals(pending: PendingApproval[]) {
  * automation has actually done lately.
  */
 export async function getTrustSummary(ctx: AuthContext) {
+  const replies = await readsReplies(ctx.workspaceId);
   const capabilities = await getCapabilities(ctx);
   const config = await getAutopilotConfig(ctx);
   const since = startOfLocalDay(ctx.workspace.timezone);
@@ -242,7 +243,7 @@ export async function getTrustSummary(ctx: AuthContext) {
       name: "Email",
       connected: isEmailConfigured(),
       detail: isEmailConfigured()
-        ? `${activeEmailProvider()}${canReceiveReplies() ? " — can read replies, so stop-on-reply is automatic" : " — send only, so stop-on-reply cannot be automatic"}`
+        ? `${activeEmailProvider()}${replies ? " — can read replies, so stop-on-reply is automatic" : " — send only, so stop-on-reply cannot be automatic"}`
         : "Nothing connected. Nothing can be sent, and no replies can arrive.",
       grants: "Sends on your behalf and reads replies to the threads it started.",
     },

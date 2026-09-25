@@ -7,7 +7,7 @@ export interface ContactEnrichmentProvider {
   findPhone(): Promise<null>;
   verifyEmail(email: string): Promise<{ status: string; confidence: number }>;
 }
-export function hunterProvider(workspaceId: string, apiKey: string): ContactEnrichmentProvider & { healthCheck(): Promise<{ ok: boolean; message: string }> } {
+export function hunterProvider(workspaceId: string, apiKey: string): ContactEnrichmentProvider & { healthCheck(): Promise<{ ok: boolean; message: string }>; findEmailDetailed(domain: string, firstName: string, lastName: string): Promise<{ email: string | null; score: number | null; acceptAll: boolean | null; verification: string | null }> } {
   async function call(path: string, params: Record<string, string>) { const url = new URL(`https://api.hunter.io/v2/${path}`); for (const [k, v] of Object.entries({ ...params, api_key: apiKey })) url.searchParams.set(k, v); return providerJson(workspaceId, "hunter", url.toString()); }
   return {
     async findPerson(domain) {
@@ -15,6 +15,11 @@ export function hunterProvider(workspaceId: string, apiKey: string): ContactEnri
       return data.data.emails.map(e => ({ email: e.value, firstName: e.first_name, lastName: e.last_name, title: e.position, confidence: e.confidence, sources: e.sources.map(s => s.uri) }));
     },
     async findEmail(domain, firstName, lastName) { const data = z.object({ data: z.object({ email: z.string().email().nullable() }) }).parse(await call("email-finder", { domain, first_name: firstName, last_name: lastName })); return data.data.email; },
+    /** Email Finder with its score and Hunter's own verification, for the fallback chain. One credit, only when found. */
+    async findEmailDetailed(domain: string, firstName: string, lastName: string) {
+      const data = z.object({ data: z.object({ email: z.string().email().nullable(), score: z.number().nullish(), position: z.string().nullish(), accept_all: z.boolean().nullish(), verification: z.object({ status: z.string().nullish() }).nullish() }).passthrough() }).parse(await call("email-finder", { domain, first_name: firstName, last_name: lastName }));
+      return { email: data.data.email, score: data.data.score ?? null, acceptAll: data.data.accept_all ?? null, verification: data.data.verification?.status ?? null };
+    },
     async findPhone() { return null; },
     async verifyEmail(email) {
       const data = z.object({ data: z.object({ status: z.string(), score: z.number().optional(), disposable: z.boolean().optional(), accept_all: z.boolean().optional() }) }).parse(await call("email-verifier", { email }));
